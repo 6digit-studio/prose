@@ -292,7 +292,8 @@ program
   .command('search <query>')
   .alias('grep')
   .description('Semantic search through evolved memory')
-  .option('-p, --project <name>', 'Filter to specific project')
+  .option('-p, --project <name>', 'Filter to specific project (auto-detects from cwd if not specified)')
+  .option('-a, --all', 'Search all projects (ignore cwd auto-detection)')
   .option('-t, --type <types>', 'Filter by type: decision,insight,gotcha,narrative,quote', 'decision,insight,gotcha')
   .option('-l, --limit <n>', 'Limit results', '10')
   .option('--json', 'Output as JSON')
@@ -300,8 +301,26 @@ program
     const types = options.type.split(',') as any[];
     const limit = parseInt(options.limit, 10);
 
+    // Auto-detect project from current directory unless --all is specified
+    let projectFilter: string[] | undefined;
+    if (options.project) {
+      projectFilter = [options.project];
+    } else if (!options.all) {
+      // Try to match cwd to a project
+      const cwd = process.cwd();
+      const cwdSanitized = cwd.replace(/\//g, '-').replace(/^-/, '');
+      const index = loadMemoryIndex();
+      const matchingProject = Object.keys(index.projects).find(p =>
+        p === cwdSanitized || p.endsWith(cwdSanitized) || cwdSanitized.endsWith(p.replace(/^-/, ''))
+      );
+      if (matchingProject) {
+        projectFilter = [matchingProject];
+        console.log(`📁 Searching in: ${matchingProject.replace(/^-Users-[^-]+-src-/, '')} (use --all for global search)\n`);
+      }
+    }
+
     const results = searchMemory(query, {
-      projects: options.project ? [options.project] : undefined,
+      projects: projectFilter,
       types,
       limit,
     });
