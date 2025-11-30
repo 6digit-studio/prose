@@ -79,4 +79,13 @@ export {
   getMemoryStats,
   generateContextMarkdown,
   writeContextFile,
+  updateCurrentFragments,
 } from './memory.js';
+
+// Horizontal evolution
+export {
+  type SessionSnapshot,
+  type HorizontalEvolutionConfig,
+  type HorizontalEvolutionResult,
+  evolveHorizontal,
+} from './horizontal.js';

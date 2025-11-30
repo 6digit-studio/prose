@@ -54,12 +54,18 @@ export interface SessionProcessingState {
 export interface ProjectMemory {
   /** Project path/name */
   project: string;
-  /** Current evolved fragments for this project */
+  /** Current evolved fragments for this project (result of horizontal evolution) */
   current: AllFragments;
   /** When last updated */
   lastUpdated: Date;
   /** Sessions that have been processed (with state for incremental updates) */
   processedSessions: SessionProcessingState[];
+  /** Per-session fragment snapshots (for horizontal evolution) */
+  sessionSnapshots: Array<{
+    sessionId: string;
+    timestamp: Date;
+    fragments: AllFragments;
+  }>;
   /** All source links for this project */
   sourceLinks: SourceLink[];
   /** Historical snapshots (optional, for time travel) */
@@ -209,13 +215,15 @@ export function createProjectMemory(project: string): ProjectMemory {
     current: emptyFragments(),
     lastUpdated: new Date(),
     processedSessions: [],
+    sessionSnapshots: [],
     sourceLinks: [],
     history: [],
   };
 }
 
 /**
- * Update project memory with new evolved fragments
+ * Update project memory with new evolved fragments from a session
+ * This stores the session's fragments as a snapshot for horizontal evolution
  */
 export function updateProjectMemory(
   memory: ProjectMemory,
@@ -225,16 +233,6 @@ export function updateProjectMemory(
   messageCount: number,
   modifiedTime: Date
 ): ProjectMemory {
-  // Create a snapshot of the current state before updating
-  const snapshot: MemorySnapshot = {
-    timestamp: new Date(),
-    fragments: memory.current,
-    sessionId,
-  };
-
-  // Keep last 10 snapshots for time travel
-  const history = [snapshot, ...(memory.history || [])].slice(0, 10);
-
   // Update or add session processing state
   const existingIndex = memory.processedSessions.findIndex(s => s.sessionId === sessionId);
   const newState: SessionProcessingState = {
@@ -251,13 +249,43 @@ export function updateProjectMemory(
       ]
     : [...memory.processedSessions, newState];
 
+  // Update or add session snapshot
+  const snapshotIndex = memory.sessionSnapshots?.findIndex(s => s.sessionId === sessionId) ?? -1;
+  const newSnapshot = {
+    sessionId,
+    timestamp: modifiedTime,
+    fragments,
+  };
+
+  const sessionSnapshots = snapshotIndex >= 0
+    ? [
+        ...(memory.sessionSnapshots || []).slice(0, snapshotIndex),
+        newSnapshot,
+        ...(memory.sessionSnapshots || []).slice(snapshotIndex + 1),
+      ]
+    : [...(memory.sessionSnapshots || []), newSnapshot];
+
   return {
     ...memory,
-    current: fragments,
+    // Don't update current directly - that's done by horizontal evolution
     lastUpdated: new Date(),
     processedSessions,
+    sessionSnapshots,
     sourceLinks: [...memory.sourceLinks, ...sourceLinks],
-    history,
+  };
+}
+
+/**
+ * Update the current (horizontally evolved) fragments
+ */
+export function updateCurrentFragments(
+  memory: ProjectMemory,
+  current: AllFragments
+): ProjectMemory {
+  return {
+    ...memory,
+    current,
+    lastUpdated: new Date(),
   };
 }
 
@@ -312,11 +340,13 @@ export interface SearchResult {
   content: string;
   context?: string;
   score: number;
+  timestamp?: Date;
   sourceLink?: SourceLink;
 }
 
 /**
  * Search across all project memories
+ * Searches sessionSnapshots for temporal awareness - newer results score higher
  */
 export function searchMemory(query: string, options?: {
   projects?: string[];
@@ -325,10 +355,27 @@ export function searchMemory(query: string, options?: {
 }): SearchResult[] {
   const index = loadMemoryIndex();
   const results: SearchResult[] = [];
+  const seen = new Set<string>(); // Dedupe by content hash
 
   const queryTerms = query.toLowerCase().split(/\s+/).filter(t => t.length > 2);
   const projectFilter = options?.projects;
   const typeFilter = options?.types;
+
+  // Find the time range for recency scoring
+  let oldestTime = Date.now();
+  let newestTime = 0;
+
+  for (const projectName of Object.keys(index.projects)) {
+    const memory = loadProjectMemory(projectName);
+    if (!memory?.sessionSnapshots) continue;
+    for (const snapshot of memory.sessionSnapshots) {
+      const time = new Date(snapshot.timestamp).getTime();
+      if (time < oldestTime) oldestTime = time;
+      if (time > newestTime) newestTime = time;
+    }
+  }
+
+  const timeRange = newestTime - oldestTime || 1; // Avoid division by zero
 
   for (const [projectName, _projectInfo] of Object.entries(index.projects)) {
     if (projectFilter && !projectFilter.includes(projectName)) {
@@ -336,90 +383,121 @@ export function searchMemory(query: string, options?: {
     }
 
     const memory = loadProjectMemory(projectName);
-    if (!memory) continue;
+    if (!memory?.sessionSnapshots) continue;
 
-    // Search decisions
-    if (!typeFilter || typeFilter.includes('decision')) {
-      for (const decision of memory.current.decisions?.decisions || []) {
-        const score = scoreMatch(queryTerms, `${decision.what} ${decision.why}`);
-        if (score > 0) {
-          results.push({
-            project: projectName,
-            type: 'decision',
-            content: decision.what,
-            context: decision.why,
-            score,
-          });
+    // Search through sessionSnapshots for temporal awareness
+    for (const snapshot of memory.sessionSnapshots) {
+      const timestamp = new Date(snapshot.timestamp);
+      const recencyBonus = ((timestamp.getTime() - oldestTime) / timeRange) * 10; // 0-10 bonus for recency
+
+      // Search decisions
+      if (!typeFilter || typeFilter.includes('decision')) {
+        for (const decision of snapshot.fragments.decisions?.decisions || []) {
+          const contentHash = `decision:${decision.what}`;
+          if (seen.has(contentHash)) continue;
+
+          const keywordScore = scoreMatch(queryTerms, `${decision.what} ${decision.why}`);
+          if (keywordScore > 0) {
+            seen.add(contentHash);
+            results.push({
+              project: projectName,
+              type: 'decision',
+              content: decision.what,
+              context: decision.why,
+              score: keywordScore + recencyBonus,
+              timestamp,
+            });
+          }
         }
       }
-    }
 
-    // Search insights
-    if (!typeFilter || typeFilter.includes('insight')) {
-      for (const insight of memory.current.insights?.insights || []) {
-        const score = scoreMatch(queryTerms, `${insight.learning} ${insight.context}`);
-        if (score > 0) {
-          results.push({
-            project: projectName,
-            type: 'insight',
-            content: insight.learning,
-            context: insight.context,
-            score,
-          });
+      // Search insights
+      if (!typeFilter || typeFilter.includes('insight')) {
+        for (const insight of snapshot.fragments.insights?.insights || []) {
+          const contentHash = `insight:${insight.learning}`;
+          if (seen.has(contentHash)) continue;
+
+          const keywordScore = scoreMatch(queryTerms, `${insight.learning} ${insight.context}`);
+          if (keywordScore > 0) {
+            seen.add(contentHash);
+            results.push({
+              project: projectName,
+              type: 'insight',
+              content: insight.learning,
+              context: insight.context,
+              score: keywordScore + recencyBonus,
+              timestamp,
+            });
+          }
         }
       }
-    }
 
-    // Search gotchas
-    if (!typeFilter || typeFilter.includes('gotcha')) {
-      for (const gotcha of memory.current.insights?.gotchas || []) {
-        const score = scoreMatch(queryTerms, `${gotcha.issue} ${gotcha.solution || ''}`);
-        if (score > 0) {
-          results.push({
-            project: projectName,
-            type: 'gotcha',
-            content: gotcha.issue,
-            context: gotcha.solution,
-            score,
-          });
+      // Search gotchas
+      if (!typeFilter || typeFilter.includes('gotcha')) {
+        for (const gotcha of snapshot.fragments.insights?.gotchas || []) {
+          const contentHash = `gotcha:${gotcha.issue}`;
+          if (seen.has(contentHash)) continue;
+
+          const keywordScore = scoreMatch(queryTerms, `${gotcha.issue} ${gotcha.solution || ''}`);
+          if (keywordScore > 0) {
+            seen.add(contentHash);
+            results.push({
+              project: projectName,
+              type: 'gotcha',
+              content: gotcha.issue,
+              context: gotcha.solution,
+              score: keywordScore + recencyBonus,
+              timestamp,
+            });
+          }
         }
       }
-    }
 
-    // Search narrative
-    if (!typeFilter || typeFilter.includes('narrative')) {
-      for (const beat of memory.current.narrative?.story_beats || []) {
-        const score = scoreMatch(queryTerms, beat.summary);
-        if (score > 0) {
-          results.push({
-            project: projectName,
-            type: 'narrative',
-            content: beat.summary,
-            context: beat.beat_type,
-            score,
-          });
+      // Search narrative
+      if (!typeFilter || typeFilter.includes('narrative')) {
+        for (const beat of snapshot.fragments.narrative?.story_beats || []) {
+          const contentHash = `narrative:${beat.summary.slice(0, 50)}`;
+          if (seen.has(contentHash)) continue;
+
+          const keywordScore = scoreMatch(queryTerms, beat.summary);
+          if (keywordScore > 0) {
+            seen.add(contentHash);
+            results.push({
+              project: projectName,
+              type: 'narrative',
+              content: beat.summary,
+              context: beat.beat_type,
+              score: keywordScore + recencyBonus,
+              timestamp,
+            });
+          }
         }
       }
-    }
 
-    // Search quotes
-    if (!typeFilter || typeFilter.includes('quote')) {
-      for (const quote of memory.current.narrative?.memorable_quotes || []) {
-        const score = scoreMatch(queryTerms, quote.quote);
-        if (score > 0) {
-          results.push({
-            project: projectName,
-            type: 'quote',
-            content: quote.quote,
-            context: quote.speaker,
-            score,
-          });
+      // Search quotes
+      if (!typeFilter || typeFilter.includes('quote')) {
+        for (const quote of snapshot.fragments.narrative?.memorable_quotes || []) {
+          const contentHash = `quote:${quote.quote.slice(0, 50)}`;
+          if (seen.has(contentHash)) continue;
+
+          const keywordScore = scoreMatch(queryTerms, quote.quote);
+          if (keywordScore > 0) {
+            seen.add(contentHash);
+            results.push({
+              project: projectName,
+              type: 'quote',
+              content: quote.quote,
+              context: quote.speaker,
+              score: keywordScore + recencyBonus,
+              timestamp,
+            });
+          }
         }
       }
     }
   }
 
-  // Sort by score descending
+  // Sort by score descending (now includes recency)
   results.sort((a, b) => b.score - a.score);
 
   // Apply limit
