@@ -107,7 +107,14 @@ export function discoverSessionFiles(projectPath?: string): SessionFile[] {
     // If a specific project path is given, filter to match
     if (projectPath) {
       const normalizedProjectPath = projectPath.replace(/\//g, '-').replace(/^-/, '');
-      if (!projectDir.name.includes(normalizedProjectPath)) {
+      const dirName = projectDir.name.replace(/^-/, '');
+
+      // Exact match (full path) or exact project name match (ends with -projectname)
+      const isExactMatch = dirName === normalizedProjectPath;
+      const isProjectNameMatch = dirName.endsWith(`-${normalizedProjectPath}`) ||
+                                  dirName === normalizedProjectPath;
+
+      if (!isExactMatch && !isProjectNameMatch) {
         continue;
       }
     }
