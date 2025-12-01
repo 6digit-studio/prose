@@ -224,6 +224,11 @@ program
       let memory = loadProjectMemory(session.project);
       const conversation = parseSessionFile(session.path);
 
+      // Skip empty sessions entirely
+      if (conversation.messages.length === 0) {
+        continue;
+      }
+
       if (options.force || sessionNeedsProcessing(
         memory,
         session.sessionId,
@@ -277,15 +282,27 @@ program
       }
 
       // Window size for evolution - Gemini 2.5 Flash has 1M context, so we can go big
-      // Process whole session at once unless it's huge (>500 messages)
       const windowSize = 500;
-      const windows = [];
-      for (let i = 0; i < conversation.messages.length; i += windowSize) {
-        windows.push(conversation.messages.slice(i, i + windowSize));
+
+      // For incremental updates, start from where we left off
+      const startIndex = isIncremental ? prevState!.messageCount : 0;
+      const messagesToProcess = conversation.messages.slice(startIndex);
+
+      if (messagesToProcess.length === 0) {
+        console.log('   ⚠️  No new messages, skipping');
+        continue;
       }
 
-      // Evolve through windows
-      let currentFragments = memory.current;
+      const windows = [];
+      for (let i = 0; i < messagesToProcess.length; i += windowSize) {
+        windows.push(messagesToProcess.slice(i, i + windowSize));
+      }
+
+      // Rolling window: feed old fragments + new messages → evolved fragments
+      // For incremental: load previous session snapshot
+      // For new session: start empty
+      const existingSnapshot = memory.sessionSnapshots?.find(s => s.sessionId === session.sessionId);
+      let currentFragments = existingSnapshot?.fragments || emptyFragments();
       let allSourceLinks: typeof conversation.messages[0]['source'][] = [];
 
       for (let i = 0; i < windows.length; i++) {
