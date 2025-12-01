@@ -99,3 +99,7 @@ temp/
 
 # Claude-specific
 .claude/
+
+# Generated output
+claude-prose-web/
+web-output/

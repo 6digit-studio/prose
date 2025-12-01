@@ -9,6 +9,13 @@
  *   show     - Display current fragments for a project
  */
 
+// Load .env file if present (check multiple locations)
+import { config } from 'dotenv';
+import { homedir } from 'os';
+import { join } from 'path';
+config();  // Load from current directory
+config({ path: join(homedir(), '.config', 'claude-prose', '.env') });  // Global config
+
 import { Command } from 'commander';
 import { discoverSessionFiles, parseSessionFile, getSessionStats } from './session-parser.js';
 import { evolveAllFragments } from './evolve.js';
@@ -113,30 +120,64 @@ program
   .option('--dry-run', 'Show what would be processed without making changes')
   .option('-v, --verbose', 'Show detailed progress')
   .action(async (options) => {
-    const apiKey = process.env.LLM_API_KEY || process.env.OPENROUTER_API_KEY;
+    const apiKey = process.env.LLM_API_KEY || process.env.OPENROUTER_API_KEY || process.env.OPENAI_API_KEY;
     if (!apiKey) {
-      console.error('❌ No API key found. Set LLM_API_KEY or OPENROUTER_API_KEY');
+      console.error('❌ No API key found. Set LLM_API_KEY, OPENROUTER_API_KEY, or OPENAI_API_KEY in .env or environment');
       process.exit(1);
     }
 
     console.log('🧬 Claude Prose - Evolving semantic memory\n');
 
-    // Discover sessions - sort OLDEST first for proper temporal evolution
-    const sessions = discoverSessionFiles(options.project);
-    // Reverse to get oldest first (discoverSessionFiles returns newest first)
-    const sessionsOldestFirst = [...sessions].reverse();
-    const limit = parseInt(options.limit, 10);
-    const sessionsToProcess = sessionsOldestFirst.slice(0, limit);
-
-    if (options.verbose) {
-      console.log(`📁 Found ${sessions.length} sessions, processing ${sessionsToProcess.length}`);
+    // Auto-detect project from current directory if not specified
+    let projectFilter = options.project;
+    if (!projectFilter) {
+      const cwd = process.cwd();
+      const cwdSanitized = cwd.replace(/\//g, '-').replace(/^-/, '');
+      const index = loadMemoryIndex();
+      const matchingProject = Object.keys(index.projects).find(p =>
+        p === cwdSanitized || p.endsWith(cwdSanitized) || cwdSanitized.endsWith(p.replace(/^-/, ''))
+      );
+      if (matchingProject) {
+        projectFilter = matchingProject;
+        console.log(`📁 Evolving: ${matchingProject.replace(/^-Users-[^-]+-src-/, '')}\n`);
+      }
     }
+
+    // Discover sessions
+    const sessions = discoverSessionFiles(projectFilter);
+    const limit = parseInt(options.limit, 10);
 
     // Load memory index
     const index = loadMemoryIndex();
 
+    // First pass: find sessions that need processing (including active ones with new messages)
+    const sessionsNeedingWork: typeof sessions = [];
+    for (const session of sessions) {
+      // Load or create project memory for this check
+      let memory = loadProjectMemory(session.project);
+      const conversation = parseSessionFile(session.path);
+
+      if (options.force || sessionNeedsProcessing(
+        memory,
+        session.sessionId,
+        conversation.messages.length,
+        session.modifiedTime
+      )) {
+        sessionsNeedingWork.push(session);
+      }
+    }
+
+    // Sort oldest-first for temporal evolution, then apply limit
+    const sessionsOldestFirst = [...sessionsNeedingWork].sort((a, b) =>
+      a.modifiedTime.getTime() - b.modifiedTime.getTime()
+    );
+    const sessionsToProcess = sessionsOldestFirst.slice(0, limit);
+
+    if (options.verbose) {
+      console.log(`📁 Found ${sessions.length} sessions, ${sessionsNeedingWork.length} need work, processing ${sessionsToProcess.length}`);
+    }
+
     let processed = 0;
-    let skipped = 0;
     let totalTokens = 0;
 
     for (const session of sessionsToProcess) {
@@ -145,22 +186,8 @@ program
       // Load or create project memory
       let memory = loadProjectMemory(projectName) || createProjectMemory(projectName);
 
-      // Parse session first to get message count
+      // Parse session
       const conversation = parseSessionFile(session.path);
-
-      // Skip if already fully processed (unless --force)
-      if (!options.force && !sessionNeedsProcessing(
-        memory,
-        session.sessionId,
-        conversation.messages.length,
-        session.modifiedTime
-      )) {
-        if (options.verbose) {
-          console.log(`⏭️  Skipping ${session.sessionId.slice(0, 8)}... (already processed, ${conversation.messages.length} messages)`);
-        }
-        skipped++;
-        continue;
-      }
 
       // Check if this is an incremental update
       const prevState = getSessionProcessingState(memory, session.sessionId);
@@ -249,8 +276,8 @@ program
     }
 
     console.log('\n📊 Summary:');
+    console.log(`   Found: ${sessions.length} sessions, ${sessionsNeedingWork.length} need updates`);
     console.log(`   Processed: ${processed} sessions`);
-    console.log(`   Skipped: ${skipped} sessions (already processed)`);
     console.log(`   Tokens used: ${totalTokens}`);
 
     // Run horizontal evolution if we processed any sessions

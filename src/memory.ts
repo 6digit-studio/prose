@@ -316,8 +316,10 @@ export function sessionNeedsProcessing(
   // Check if file has grown (new messages)
   if (currentMessageCount > state.messageCount) return true;
 
-  // Check if file was modified (fallback)
-  if (currentModifiedTime > state.modifiedTime) return true;
+  // Check if file was modified (fallback) - convert to timestamps for reliable comparison
+  const currentTime = new Date(currentModifiedTime).getTime();
+  const storedTime = new Date(state.modifiedTime).getTime();
+  if (currentTime > storedTime) return true;
 
   return false;
 }
