@@ -118,6 +118,73 @@ app.get('/api/stats', (req, res) => {
   res.json(stats);
 });
 
+// Get session snapshots for a project
+app.get('/api/projects/:id/sessions', (req, res) => {
+  const projectId = req.params.id;
+  const memory = loadProjectMemory(projectId);
+
+  if (!memory) {
+    return res.status(404).json({ error: 'Project not found' });
+  }
+
+  const sessions = (memory.sessionSnapshots || [])
+    .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
+    .map(s => {
+      const decisions = s.fragments.decisions?.decisions || [];
+      const insights = s.fragments.insights?.insights || [];
+      const gotchas = s.fragments.insights?.gotchas || [];
+      const quotes = s.fragments.narrative?.memorable_quotes || [];
+      const beats = s.fragments.narrative?.story_beats || [];
+
+      return {
+        id: s.sessionId.slice(0, 8),
+        fullId: s.sessionId,
+        timestamp: s.timestamp,
+        focus: s.fragments.focus?.current_goal,
+        stats: {
+          decisions: decisions.length,
+          insights: insights.length,
+          gotchas: gotchas.length,
+          quotes: quotes.length,
+          beats: beats.length,
+        },
+        decisions: decisions.map(d => ({
+          id: shortId(d.what),
+          type: 'decision',
+          what: d.what,
+          why: d.why,
+          confidence: d.confidence,
+        })),
+        insights: insights.map(i => ({
+          id: shortId(i.learning),
+          type: 'insight',
+          learning: i.learning,
+          context: i.context,
+        })),
+        gotchas: gotchas.map(g => ({
+          id: shortId(g.issue),
+          type: 'gotcha',
+          issue: g.issue,
+          solution: g.solution,
+        })),
+        quotes: quotes.map(q => ({
+          id: shortId(q.quote),
+          type: 'quote',
+          quote: q.quote,
+          speaker: q.speaker,
+        })),
+        beats: beats.map(b => ({
+          type: b.beat_type,
+          summary: b.summary,
+          mood: b.emotional_tone,
+        })),
+        musings: s.fragments.decisions?.musings,
+      };
+    });
+
+  res.json(sessions);
+});
+
 // ============================================================================
 // Dashboard HTML
 // ============================================================================
@@ -381,6 +448,110 @@ const dashboardHtml = `
       color: var(--text-muted);
       margin-top: 0.5rem;
     }
+
+    /* Session styles */
+    .session-card {
+      background: var(--bg-secondary);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      margin-bottom: 0.75rem;
+      overflow: hidden;
+    }
+
+    .session-card.expanded { border-color: var(--accent); }
+
+    .session-header {
+      padding: 1rem;
+      cursor: pointer;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .session-header:hover { background: var(--bg-tertiary); }
+
+    .session-date {
+      font-weight: 600;
+      color: var(--accent);
+    }
+
+    .session-id {
+      font-family: monospace;
+      font-size: 0.8rem;
+      color: var(--text-muted);
+      margin-left: 0.75rem;
+    }
+
+    .session-focus {
+      color: var(--text);
+      font-size: 0.9rem;
+      margin-top: 0.25rem;
+      max-width: 500px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .session-stats {
+      display: flex;
+      gap: 0.75rem;
+      font-size: 0.8rem;
+      color: var(--text-muted);
+    }
+
+    .session-stat { display: flex; align-items: center; gap: 0.25rem; }
+
+    .session-body {
+      display: none;
+      padding: 0 1rem 1rem 1rem;
+      border-top: 1px solid var(--border);
+    }
+
+    .session-card.expanded .session-body { display: block; }
+
+    .session-section {
+      margin-top: 1rem;
+    }
+
+    .session-section-title {
+      font-size: 0.8rem;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-bottom: 0.5rem;
+    }
+
+    .session-fragment {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 0.75rem;
+      margin-bottom: 0.5rem;
+      font-size: 0.9rem;
+    }
+
+    .session-beat {
+      padding: 0.5rem 0;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .session-beat:last-child { border-bottom: none; }
+
+    .beat-type {
+      display: inline-block;
+      font-size: 0.7rem;
+      padding: 0.1rem 0.4rem;
+      border-radius: 3px;
+      background: var(--purple);
+      color: #fff;
+      margin-right: 0.5rem;
+    }
+
+    .expand-icon {
+      transition: transform 0.2s;
+    }
+
+    .session-card.expanded .expand-icon { transform: rotate(90deg); }
   </style>
 </head>
 <body>
@@ -403,6 +574,7 @@ const dashboardHtml = `
         <div class="tab" data-tab="insights">Insights <span class="tab-badge" id="insights-count">0</span></div>
         <div class="tab" data-tab="gotchas">Gotchas <span class="tab-badge" id="gotchas-count">0</span></div>
         <div class="tab" data-tab="quotes">Quotes <span class="tab-badge" id="quotes-count">0</span></div>
+        <div class="tab" data-tab="sessions">Sessions <span class="tab-badge" id="sessions-count">0</span></div>
       </div>
 
       <div class="fragments-container" id="fragments">
@@ -415,6 +587,7 @@ const dashboardHtml = `
     let currentProject = null;
     let currentTab = 'decisions';
     let projectData = null;
+    let sessionsData = [];
 
     // Load projects
     async function loadProjects() {
@@ -444,15 +617,20 @@ const dashboardHtml = `
         el.classList.toggle('active', el.dataset.id === id);
       });
 
-      // Load project data
-      const res = await fetch(\`/api/projects/\${encodeURIComponent(id)}\`);
-      projectData = await res.json();
+      // Load project data and sessions in parallel
+      const [projectRes, sessionsRes] = await Promise.all([
+        fetch(\`/api/projects/\${encodeURIComponent(id)}\`),
+        fetch(\`/api/projects/\${encodeURIComponent(id)}/sessions\`)
+      ]);
+      projectData = await projectRes.json();
+      sessionsData = await sessionsRes.json();
 
       // Update counts
       document.getElementById('decisions-count').textContent = projectData.decisions.length;
       document.getElementById('insights-count').textContent = projectData.insights.length;
       document.getElementById('gotchas-count').textContent = projectData.gotchas.length;
       document.getElementById('quotes-count').textContent = projectData.quotes.length;
+      document.getElementById('sessions-count').textContent = sessionsData.length;
 
       renderFragments();
     }
@@ -463,6 +641,12 @@ const dashboardHtml = `
 
       if (!projectData) {
         container.innerHTML = '<div class="empty-state">Select a project to view fragments</div>';
+        return;
+      }
+
+      // Special handling for sessions tab
+      if (currentTab === 'sessions') {
+        renderSessions(container);
         return;
       }
 
@@ -488,6 +672,109 @@ const dashboardHtml = `
       // Add copy handlers
       container.querySelectorAll('.fragment-id').forEach(el => {
         el.addEventListener('click', () => copyId(el));
+      });
+    }
+
+    function renderSessions(container) {
+      if (sessionsData.length === 0) {
+        container.innerHTML = '<div class="empty-state">No sessions found</div>';
+        return;
+      }
+
+      let html = '';
+      for (const session of sessionsData) {
+        const date = new Date(session.timestamp);
+        const dateStr = date.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+        const timeStr = date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+        const total = session.stats.decisions + session.stats.insights + session.stats.gotchas;
+
+        html += \`
+          <div class="session-card" data-session-id="\${session.id}">
+            <div class="session-header">
+              <div>
+                <span class="session-date">\${dateStr} \${timeStr}</span>
+                <span class="session-id">#\${session.id}</span>
+                \${session.focus ? \`<div class="session-focus">\${session.focus}</div>\` : ''}
+              </div>
+              <div class="session-stats">
+                <span class="session-stat">⚖️ \${session.stats.decisions}</span>
+                <span class="session-stat">💡 \${session.stats.insights}</span>
+                <span class="session-stat">⚠️ \${session.stats.gotchas}</span>
+                <span class="session-stat">💬 \${session.stats.quotes}</span>
+                <span class="expand-icon">▶</span>
+              </div>
+            </div>
+            <div class="session-body">
+              \${session.musings ? \`<div class="musings-box">\${session.musings}</div>\` : ''}
+
+              \${session.beats.length ? \`
+                <div class="session-section">
+                  <div class="session-section-title">Story</div>
+                  \${session.beats.map(b => \`
+                    <div class="session-beat">
+                      <span class="beat-type">\${b.type}</span>
+                      \${b.summary}
+                    </div>
+                  \`).join('')}
+                </div>
+              \` : ''}
+
+              \${session.decisions.length ? \`
+                <div class="session-section">
+                  <div class="session-section-title">Decisions</div>
+                  \${session.decisions.map(d => \`
+                    <div class="session-fragment">
+                      <strong>\${d.what}</strong>
+                      <div style="color: var(--text-muted); margin-top: 0.25rem;">\${d.why}</div>
+                    </div>
+                  \`).join('')}
+                </div>
+              \` : ''}
+
+              \${session.insights.length ? \`
+                <div class="session-section">
+                  <div class="session-section-title">Insights</div>
+                  \${session.insights.map(i => \`
+                    <div class="session-fragment">\${i.learning}</div>
+                  \`).join('')}
+                </div>
+              \` : ''}
+
+              \${session.gotchas.length ? \`
+                <div class="session-section">
+                  <div class="session-section-title">Gotchas</div>
+                  \${session.gotchas.map(g => \`
+                    <div class="session-fragment">
+                      <strong>\${g.issue}</strong>
+                      \${g.solution ? \`<div style="color: var(--green); margin-top: 0.25rem;">💡 \${g.solution}</div>\` : ''}
+                    </div>
+                  \`).join('')}
+                </div>
+              \` : ''}
+
+              \${session.quotes.length ? \`
+                <div class="session-section">
+                  <div class="session-section-title">Quotes</div>
+                  \${session.quotes.map(q => \`
+                    <div class="session-fragment">
+                      <em>"\${q.quote}"</em>
+                      <div style="color: var(--text-muted);">— \${q.speaker}</div>
+                    </div>
+                  \`).join('')}
+                </div>
+              \` : ''}
+            </div>
+          </div>
+        \`;
+      }
+
+      container.innerHTML = html;
+
+      // Add click handlers for expanding sessions
+      container.querySelectorAll('.session-header').forEach(el => {
+        el.addEventListener('click', () => {
+          el.closest('.session-card').classList.toggle('expanded');
+        });
       });
     }
 
