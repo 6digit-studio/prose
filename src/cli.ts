@@ -750,6 +750,30 @@ program
   });
 
 // ============================================================================
+// serve - Interactive dashboard
+// ============================================================================
+
+program
+  .command('serve')
+  .description('Start interactive dashboard server')
+  .option('-p, --port <port>', 'Port to run on', '3000')
+  .option('--open', 'Open browser automatically')
+  .action(async (options) => {
+    const { startServer } = await import('./server.js');
+    const port = parseInt(options.port, 10);
+
+    startServer(port);
+
+    if (options.open) {
+      setTimeout(() => {
+        import('child_process').then(({ exec }) => {
+          exec(`open "http://localhost:${port}"`);
+        });
+      }, 500);
+    }
+  });
+
+// ============================================================================
 // Parse and run
 // ============================================================================
 

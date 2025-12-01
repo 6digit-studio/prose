@@ -89,3 +89,6 @@ export {
   type HorizontalEvolutionResult,
   evolveHorizontal,
 } from './horizontal.js';
+
+// Web server
+export { startServer } from './server.js';
