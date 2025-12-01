@@ -14,8 +14,8 @@ import { config } from 'dotenv';
 import { homedir } from 'os';
 import { join } from 'path';
 import { existsSync, mkdirSync, writeFileSync } from 'fs';
-config();  // Load from current directory
-config({ path: join(homedir(), '.config', 'claude-prose', '.env') });  // Global config
+config({ quiet: true });  // Load from current directory
+config({ path: join(homedir(), '.config', 'claude-prose', '.env'), quiet: true });  // Global config
 
 import { Command } from 'commander';
 import { discoverSessionFiles, parseSessionFile, getSessionStats } from './session-parser.js';
@@ -476,31 +476,108 @@ program
 
 program
   .command('status')
-  .description('Show memory statistics')
-  .action(() => {
-    const stats = getMemoryStats();
-    const sessionStats = getSessionStats();
+  .description('Show memory statistics (CWD-aware, use "status global" for all projects)')
+  .argument('[scope]', '"global" for all projects, otherwise auto-detects from cwd')
+  .action((scope) => {
+    const isGlobal = scope === 'global';
 
-    console.log('📊 Claude Prose Memory Status\n');
+    // Try to detect project from CWD
+    let detectedProject: string | undefined;
+    if (!isGlobal) {
+      const cwd = process.cwd();
+      const cwdSanitized = cwd.replace(/\//g, '-').replace(/^-/, '');
+      const index = loadMemoryIndex();
+      detectedProject = Object.keys(index.projects).find(p =>
+        p === cwdSanitized || p.endsWith(cwdSanitized) || cwdSanitized.endsWith(p.replace(/^-/, ''))
+      );
 
-    console.log('📁 Available Sessions:');
-    console.log(`   Total sessions: ${sessionStats.totalSessions}`);
-    console.log(`   Total messages: ${sessionStats.totalMessages}`);
-    console.log(`   Projects: ${sessionStats.projects.length}`);
-    if (sessionStats.dateRange.earliest && sessionStats.dateRange.latest) {
-      console.log(`   Date range: ${sessionStats.dateRange.earliest.toLocaleDateString()} - ${sessionStats.dateRange.latest.toLocaleDateString()}`);
+      // Also check raw session directories if not in evolved memory yet
+      if (!detectedProject) {
+        const sessions = discoverSessionFiles();
+        const projectNames = [...new Set(sessions.map(s => s.project))];
+        detectedProject = projectNames.find(p =>
+          p === cwdSanitized || p.endsWith(cwdSanitized) || cwdSanitized.endsWith(p.replace(/^-/, ''))
+        );
+      }
     }
 
-    console.log('\n🧠 Evolved Memory:');
-    console.log(`   Projects: ${stats.totalProjects}`);
-    console.log(`   Sessions processed: ${stats.totalSessions}`);
-    console.log(`   Decisions captured: ${stats.totalDecisions}`);
-    console.log(`   Insights captured: ${stats.totalInsights}`);
-    if (stats.lastUpdated) {
-      console.log(`   Last updated: ${stats.lastUpdated.toLocaleString()}`);
-    }
+    if (detectedProject && !isGlobal) {
+      // Project-specific status
+      const shortName = detectedProject.replace(/^-Users-[^-]+-src-/, '');
+      console.log(`📊 ${shortName}\n`);
 
-    console.log(`\n📂 Memory location: ${getMemoryDir()}`);
+      // Raw session files for this project
+      const sessions = discoverSessionFiles(detectedProject);
+      let totalMessages = 0;
+      let earliestDate: Date | null = null;
+      let latestDate: Date | null = null;
+
+      for (const session of sessions) {
+        const conversation = parseSessionFile(session.path);
+        totalMessages += conversation.messages.length;
+
+        if (!earliestDate || session.modifiedTime < earliestDate) {
+          earliestDate = session.modifiedTime;
+        }
+        if (!latestDate || session.modifiedTime > latestDate) {
+          latestDate = session.modifiedTime;
+        }
+      }
+
+      console.log('📁 Raw Sessions:');
+      console.log(`   Files: ${sessions.length}`);
+      console.log(`   Messages: ${totalMessages.toLocaleString()}`);
+      if (earliestDate && latestDate) {
+        const fmt = (d: Date) => d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+        console.log(`   Date range: ${fmt(earliestDate)} - ${fmt(latestDate)}`);
+      }
+
+      // Evolved memory for this project
+      const memory = loadProjectMemory(detectedProject);
+      if (memory) {
+        const decisions = memory.current.decisions?.decisions?.length || 0;
+        const insights = memory.current.insights?.insights?.length || 0;
+        const gotchas = memory.current.insights?.gotchas?.length || 0;
+        const processedCount = memory.processedSessions?.length || 0;
+
+        console.log('\n🧠 Evolved Memory:');
+        console.log(`   Sessions: ${processedCount}/${sessions.length} processed`);
+        console.log(`   Decisions: ${decisions}`);
+        console.log(`   Insights: ${insights}`);
+        console.log(`   Gotchas: ${gotchas}`);
+        console.log(`   Last evolved: ${memory.lastUpdated.toLocaleString()}`);
+      } else {
+        console.log('\n🧠 Evolved Memory:');
+        console.log('   Not yet evolved. Run: claude-prose evolve');
+      }
+
+      console.log(`\n💡 Tip: Use "claude-prose status global" for all projects`);
+    } else {
+      // Global status (original behavior)
+      const stats = getMemoryStats();
+      const sessionStats = getSessionStats();
+
+      console.log('📊 Claude Prose - Global Status\n');
+
+      console.log('📁 Available Sessions:');
+      console.log(`   Total sessions: ${sessionStats.totalSessions}`);
+      console.log(`   Total messages: ${sessionStats.totalMessages.toLocaleString()}`);
+      console.log(`   Projects: ${sessionStats.projects.length}`);
+      if (sessionStats.dateRange.earliest && sessionStats.dateRange.latest) {
+        console.log(`   Date range: ${sessionStats.dateRange.earliest.toLocaleDateString()} - ${sessionStats.dateRange.latest.toLocaleDateString()}`);
+      }
+
+      console.log('\n🧠 Evolved Memory:');
+      console.log(`   Projects: ${stats.totalProjects}`);
+      console.log(`   Sessions processed: ${stats.totalSessions}`);
+      console.log(`   Decisions captured: ${stats.totalDecisions}`);
+      console.log(`   Insights captured: ${stats.totalInsights}`);
+      if (stats.lastUpdated) {
+        console.log(`   Last updated: ${stats.lastUpdated.toLocaleString()}`);
+      }
+
+      console.log(`\n📂 Memory location: ${getMemoryDir()}`);
+    }
   });
 
 // ============================================================================
