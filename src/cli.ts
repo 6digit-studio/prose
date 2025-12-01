@@ -18,7 +18,7 @@ config({ quiet: true });  // Load from current directory
 config({ path: join(homedir(), '.config', 'claude-prose', '.env'), quiet: true });  // Global config
 
 import { Command } from 'commander';
-import { discoverSessionFiles, parseSessionFile, getSessionStats } from './session-parser.js';
+import { discoverSessionFiles, parseSessionFile, parseSessionFileFromOffset, getSessionStats } from './session-parser.js';
 import { evolveAllFragments } from './evolve.js';
 import { emptyFragments } from './schemas.js';
 import {
@@ -30,6 +30,7 @@ import {
   updateProjectMemory,
   updateCurrentFragments,
   sessionNeedsProcessing,
+  sessionNeedsProcessingFast,
   getSessionProcessingState,
   searchMemory,
   getMemoryStats,
@@ -217,24 +218,17 @@ program
     // Load memory index
     const index = loadMemoryIndex();
 
-    // First pass: find sessions that need processing (including active ones with new messages)
+    // First pass: FAST check using file size (no parsing!)
     const sessionsNeedingWork: typeof sessions = [];
     for (const session of sessions) {
-      // Load or create project memory for this check
-      let memory = loadProjectMemory(session.project);
-      const conversation = parseSessionFile(session.path);
+      // Skip zero-size files
+      if (session.fileSize === 0) continue;
 
-      // Skip empty sessions entirely
-      if (conversation.messages.length === 0) {
-        continue;
-      }
+      // Load project memory for fast check
+      const memory = loadProjectMemory(session.project);
 
-      if (options.force || sessionNeedsProcessing(
-        memory,
-        session.sessionId,
-        conversation.messages.length,
-        session.modifiedTime
-      )) {
+      // Fast check: compare file size (append-only JSONL)
+      if (options.force || sessionNeedsProcessingFast(memory, session.sessionId, session.fileSize)) {
         sessionsNeedingWork.push(session);
       }
     }
@@ -257,21 +251,47 @@ program
 
       // Load or create project memory
       let memory = loadProjectMemory(projectName) || createProjectMemory(projectName);
-
-      // Parse session
-      const conversation = parseSessionFile(session.path);
-
-      // Check if this is an incremental update
       const prevState = getSessionProcessingState(memory, session.sessionId);
-      const isIncremental = prevState && prevState.messageCount < conversation.messages.length;
 
-      if (isIncremental) {
-        console.log(`📖 Updating ${session.sessionId.slice(0, 8)}... (+${conversation.messages.length - prevState.messageCount} new messages)`);
+      // Use offset-based parsing if we have a stored fileSize (append-only optimization)
+      let messagesToProcess: ReturnType<typeof parseSessionFile>['messages'];
+      let totalMessageCount: number;
+      let isIncremental = false;
+
+      if (prevState?.fileSize && prevState.fileSize < session.fileSize) {
+        // FAST PATH: Only read new bytes from the file
+        const newMessages = parseSessionFileFromOffset(
+          session.path,
+          prevState.fileSize,
+          session.sessionId,
+          projectName
+        );
+        messagesToProcess = newMessages;
+        totalMessageCount = prevState.messageCount + newMessages.length;
+        isIncremental = true;
+        console.log(`📖 Updating ${session.sessionId.slice(0, 8)}... (+${newMessages.length} new messages, read ${session.fileSize - prevState.fileSize} bytes)`);
       } else {
-        console.log(`📖 Processing ${session.sessionId.slice(0, 8)}... (${projectName.slice(-30)})`);
+        // FULL PARSE: New session or no stored fileSize
+        const conversation = parseSessionFile(session.path);
+        totalMessageCount = conversation.messages.length;
+
+        if (prevState && prevState.messageCount < conversation.messages.length) {
+          // Had previous state but no fileSize - slice from message count
+          messagesToProcess = conversation.messages.slice(prevState.messageCount);
+          isIncremental = true;
+          console.log(`📖 Updating ${session.sessionId.slice(0, 8)}... (+${messagesToProcess.length} new messages)`);
+        } else if (prevState && prevState.messageCount >= conversation.messages.length) {
+          // No new messages
+          console.log(`📖 Processing ${session.sessionId.slice(0, 8)}... (no new messages, skipping)`);
+          continue;
+        } else {
+          // New session
+          messagesToProcess = conversation.messages;
+          console.log(`📖 Processing ${session.sessionId.slice(0, 8)}... (${projectName.slice(-30)})`);
+        }
       }
 
-      if (conversation.messages.length === 0) {
+      if (messagesToProcess.length === 0) {
         console.log('   ⚠️  No messages, skipping');
         continue;
       }
@@ -284,15 +304,6 @@ program
       // Window size for evolution - Gemini 2.5 Flash has 1M context, so we can go big
       const windowSize = 500;
 
-      // For incremental updates, start from where we left off
-      const startIndex = isIncremental ? prevState!.messageCount : 0;
-      const messagesToProcess = conversation.messages.slice(startIndex);
-
-      if (messagesToProcess.length === 0) {
-        console.log('   ⚠️  No new messages, skipping');
-        continue;
-      }
-
       const windows = [];
       for (let i = 0; i < messagesToProcess.length; i += windowSize) {
         windows.push(messagesToProcess.slice(i, i + windowSize));
@@ -303,7 +314,7 @@ program
       // For new session: start empty
       const existingSnapshot = memory.sessionSnapshots?.find(s => s.sessionId === session.sessionId);
       let currentFragments = existingSnapshot?.fragments || emptyFragments();
-      let allSourceLinks: typeof conversation.messages[0]['source'][] = [];
+      let allSourceLinks: typeof messagesToProcess[0]['source'][] = [];
 
       for (let i = 0; i < windows.length; i++) {
         const window = windows[i];
@@ -317,8 +328,8 @@ program
           {
             messages: window,
             allFragments: currentFragments,
-            project: conversation.project,
-            sessionId: conversation.sessionId,
+            project: projectName,
+            sessionId: session.sessionId,
           },
           { apiKey }
         );
@@ -334,14 +345,15 @@ program
         totalTokens += result.tokensUsed;
       }
 
-      // Update memory with message count for incremental tracking
+      // Update memory with message count and file size for incremental tracking
       memory = updateProjectMemory(
         memory,
         currentFragments,
         session.sessionId,
         allSourceLinks,
-        conversation.messages.length,
-        session.modifiedTime
+        totalMessageCount,
+        session.modifiedTime,
+        session.fileSize
       );
       saveProjectMemory(memory);
 

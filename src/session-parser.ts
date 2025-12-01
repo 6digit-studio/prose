@@ -5,7 +5,7 @@
  * with temporal ordering and source links for provenance.
  */
 
-import { readFileSync, readdirSync, existsSync, statSync } from 'fs';
+import { readFileSync, readdirSync, existsSync, statSync, openSync, readSync, closeSync } from 'fs';
 import { join, basename } from 'path';
 import { homedir } from 'os';
 
@@ -40,6 +40,8 @@ export interface SessionFile {
   sessionId: string;
   project: string;
   modifiedTime: Date;
+  /** File size in bytes (for fast append-only change detection) */
+  fileSize: number;
 }
 
 // Raw JSONL line types (as they appear in the file)
@@ -131,6 +133,7 @@ export function discoverSessionFiles(projectPath?: string): SessionFile[] {
         sessionId: file.name.replace('.jsonl', ''),
         project: projectDir.name,
         modifiedTime: stats.mtime,
+        fileSize: stats.size,
       });
     }
   }
@@ -240,6 +243,86 @@ export function parseSessionFile(filePath: string): Conversation {
     startTime: messages[0]?.timestamp || new Date(),
     endTime: messages[messages.length - 1]?.timestamp || new Date(),
   };
+}
+
+/**
+ * Parse only NEW content from a session file, starting from a byte offset.
+ * For append-only JSONL files, this reads only the bytes added since last processing.
+ */
+export function parseSessionFileFromOffset(
+  filePath: string,
+  startOffset: number,
+  existingSessionId?: string,
+  existingProject?: string
+): Message[] {
+  const stats = statSync(filePath);
+  if (startOffset >= stats.size) {
+    return []; // No new content
+  }
+
+  // Read only new bytes
+  const fd = openSync(filePath, 'r');
+  const buffer = Buffer.alloc(stats.size - startOffset);
+  readSync(fd, buffer, 0, buffer.length, startOffset);
+  closeSync(fd);
+
+  const content = buffer.toString('utf-8');
+  const lines = content.split('\n').filter(line => line.trim());
+
+  // First line might be partial if we seeked mid-line, so try to parse and skip if invalid
+  const messages: Message[] = [];
+  let sessionId = existingSessionId || '';
+  let project = existingProject || '';
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    try {
+      const parsed = JSON.parse(line) as RawLine;
+
+      if (parsed.type === 'file-history-snapshot') continue;
+
+      if (!sessionId && 'sessionId' in parsed) sessionId = parsed.sessionId;
+      if (!project && 'cwd' in parsed && parsed.cwd) project = parsed.cwd;
+
+      if (parsed.type === 'user') {
+        const text = extractTextContent(parsed.message.content);
+        if (text.trim()) {
+          messages.push({
+            role: 'user',
+            content: text,
+            timestamp: new Date(parsed.timestamp),
+            source: {
+              sessionId: parsed.sessionId,
+              messageUuid: parsed.uuid,
+              timestamp: new Date(parsed.timestamp),
+              filePath,
+            },
+          });
+        }
+      } else if (parsed.type === 'assistant') {
+        const text = extractTextContent(parsed.message.content);
+        if (text.trim()) {
+          messages.push({
+            role: 'assistant',
+            content: text,
+            timestamp: new Date(parsed.timestamp),
+            source: {
+              sessionId: parsed.sessionId,
+              messageUuid: parsed.uuid,
+              timestamp: new Date(parsed.timestamp),
+              filePath,
+            },
+          });
+        }
+      }
+    } catch (e) {
+      // Skip malformed lines (including partial first line from seeking)
+      continue;
+    }
+  }
+
+  messages.sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
+  return messages;
 }
 
 /**

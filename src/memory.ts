@@ -49,6 +49,8 @@ export interface SessionProcessingState {
   messageCount: number;
   /** File modification time when last processed */
   modifiedTime: Date;
+  /** File size in bytes when last processed (for fast append-only check) */
+  fileSize?: number;
 }
 
 export interface ProjectMemory {
@@ -231,7 +233,8 @@ export function updateProjectMemory(
   sessionId: string,
   sourceLinks: SourceLink[],
   messageCount: number,
-  modifiedTime: Date
+  modifiedTime: Date,
+  fileSize?: number
 ): ProjectMemory {
   // Update or add session processing state
   const existingIndex = memory.processedSessions.findIndex(s => s.sessionId === sessionId);
@@ -239,6 +242,7 @@ export function updateProjectMemory(
     sessionId,
     messageCount,
     modifiedTime,
+    fileSize,
   };
 
   const processedSessions = existingIndex >= 0
@@ -303,6 +307,25 @@ export function getSessionProcessingState(
 /**
  * Check if a session needs (re)processing
  * Returns true if: never processed, or has new messages since last processing
+ */
+/**
+ * Fast check using file size (no parsing needed for append-only JSONL)
+ */
+export function sessionNeedsProcessingFast(
+  memory: ProjectMemory | null,
+  sessionId: string,
+  currentFileSize: number
+): boolean {
+  const state = getSessionProcessingState(memory, sessionId);
+  if (!state) return true; // Never processed
+  if (!state.fileSize) return true; // No file size stored, need to process
+
+  // Append-only: if file grew, there's new content
+  return currentFileSize > state.fileSize;
+}
+
+/**
+ * Full check (requires parsing - use sessionNeedsProcessingFast first)
  */
 export function sessionNeedsProcessing(
   memory: ProjectMemory | null,
