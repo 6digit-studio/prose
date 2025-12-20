@@ -259,7 +259,7 @@ program
       const matchingBrains = brains.filter(b => matchBrainToProject(b, projectFilter!));
 
       for (const brain of matchingBrains) {
-        const artifacts = getAntigravityArtifacts(brain);
+        const artifacts = getAntigravityArtifacts(brain, projectFilter!);
         for (const art of artifacts) {
           // Tag as antigravity sourceType
           sessions.push({ ...art, sourceType: 'antigravity' });

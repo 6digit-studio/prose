@@ -90,7 +90,7 @@ export function getAntigravityBrains(): string[] {
 /**
  * Parse Antigravity artifacts as pseudo-sessions
  */
-export function getAntigravityArtifacts(brainPath: string): SessionFile[] {
+export function getAntigravityArtifacts(brainPath: string, projectName: string): SessionFile[] {
     if (!existsSync(brainPath)) return [];
 
     const artifacts: SessionFile[] = [];
@@ -105,7 +105,7 @@ export function getAntigravityArtifacts(brainPath: string): SessionFile[] {
         artifacts.push({
             path: filePath,
             sessionId,
-            project: `antigravity-${basename(brainPath)}`,
+            project: projectName,
             modifiedTime: stats.mtime,
             fileSize: stats.size,
         });
