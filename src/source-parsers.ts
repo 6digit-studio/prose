@@ -157,13 +157,76 @@ export function matchBrainToProject(brainPath: string, projectFilter: string): b
 }
 
 /**
- * Get the date of the latest git commit
+ * Retrieval of latest git commit date for incremental git syncing
  */
-export function getLatestGitCommitDate(repoPath: string): Date {
+export function getLatestGitCommitDate(repoPath: string): Date | null {
     try {
         const output = execSync(`git -C "${repoPath}" log -1 --format=%at`, { encoding: 'utf-8' });
         return new Date(parseInt(output.trim(), 10) * 1000);
     } catch {
-        return new Date();
+        return null;
+    }
+}
+
+// ============================================================================
+// Intelligent Design Integration
+// ============================================================================
+
+/**
+ * Discover Intelligent Design sessions in .claude/prose/
+ */
+export function getDesignSessions(rootPath: string, projectName: string): SessionFile[] {
+    const proseDir = join(rootPath, '.claude', 'prose');
+    if (!existsSync(proseDir)) return [];
+
+    const artifacts: SessionFile[] = [];
+    try {
+        const files = readdirSync(proseDir, { withFileTypes: true })
+            .filter(f => f.isFile() && f.name.startsWith('design-') && f.name.endsWith('.json'));
+
+        for (const file of files) {
+            const filePath = join(proseDir, file.name);
+            const stats = statSync(filePath);
+            const sessionId = file.name.replace('.json', '');
+
+            artifacts.push({
+                path: filePath,
+                sessionId,
+                project: projectName,
+                modifiedTime: stats.mtime,
+                fileSize: stats.size,
+            });
+        }
+    } catch {
+        // Ignore errors
+    }
+
+    return artifacts;
+}
+
+/**
+ * Parse a design session JSON file into messages
+ */
+export function parseDesignSession(filePath: string, sessionId: string): Message[] {
+    try {
+        const content = readFileSync(filePath, 'utf-8');
+        const artifact = JSON.parse(content);
+        const stats = statSync(filePath);
+
+        if (artifact.type !== 'design-session') return [];
+
+        return artifact.messages.map((m: any, i: number) => ({
+            role: m.role,
+            content: i === 0 ? `INTELLIGENT DESIGN SESSION:\n\n${m.content}` : m.content,
+            timestamp: stats.mtime,
+            source: {
+                sessionId,
+                messageUuid: `${sessionId}-${i}`,
+                timestamp: stats.mtime,
+                filePath,
+            },
+        }));
+    } catch {
+        return [];
     }
 }

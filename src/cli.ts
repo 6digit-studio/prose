@@ -41,8 +41,10 @@ import {
 } from './memory.js';
 import { evolveHorizontal } from './horizontal.js';
 import { generateWebsite } from './web.js';
-import { getGitCommits, isGitRepo, getAntigravityBrains, getAntigravityArtifacts, parseAntigravityArtifact, matchBrainToProject, getLatestGitCommitDate } from './source-parsers.js';
+import { getGitCommits, isGitRepo, getAntigravityBrains, getAntigravityArtifacts, parseAntigravityArtifact, matchBrainToProject, getLatestGitCommitDate, getDesignSessions, parseDesignSession } from './source-parsers.js';
+import { startServer } from './server.js';
 import { injectMemory, ensureTemplate } from './injector.js';
+import { startDesignSession } from './design.js';
 
 const program = new Command();
 
@@ -244,11 +246,12 @@ program
       if (isGitRepo(cwd)) {
         const repoName = cwd.split('/').pop() || 'repo';
         const project = projectFilter || cwd.replace(/\//g, '-').replace(/^-/, '');
+        const latestCommitDate = getLatestGitCommitDate(cwd);
         sessions.push({
           path: cwd,
           sessionId: `git-${repoName}`,
           project,
-          modifiedTime: getLatestGitCommitDate(cwd),
+          modifiedTime: latestCommitDate || new Date(),
           fileSize: 1000, // Placeholder
           sourceType: 'git',
         });
@@ -265,6 +268,14 @@ program
         for (const art of artifacts) {
           // Tag as antigravity sourceType
           sessions.push({ ...art, sourceType: 'antigravity' });
+        }
+      }
+
+      // Add Intelligent Design sessions
+      if (projectFilter) {
+        const designSessions = getDesignSessions(process.cwd(), projectFilter);
+        for (const ds of designSessions) {
+          sessions.push({ ...ds, sourceType: 'design' as any });
         }
       }
     }
@@ -340,12 +351,13 @@ program
       }
 
       if (session.sourceType === 'git') {
-        const commits = getGitCommits(session.path);
-        totalMessageCount = commits.length;
-        messagesToProcess = prevState ? commits.slice(prevState.messageCount) : commits;
-        if (messagesToProcess.length > 0) {
-          console.log(`📖 Syncing git commits... (+${messagesToProcess.length} new commits)`);
-        }
+        console.log(`📖 Syncing git log... (${session.sessionId})`);
+        messagesToProcess = getGitCommits(session.path, 10);
+        totalMessageCount = messagesToProcess.length; // Assuming getGitCommits returns all relevant commits
+      } else if (session.sourceType === ('design' as any)) {
+        console.log(`📖 Syncing design session... (${session.sessionId})`);
+        messagesToProcess = parseDesignSession(session.path, session.sessionId);
+        totalMessageCount = messagesToProcess.length;
       } else if (session.sourceType === 'antigravity') {
         const artifactMessages = parseAntigravityArtifact(session.path, session.sessionId, projectName);
         totalMessageCount = artifactMessages.length;
@@ -554,6 +566,50 @@ program
         }
       }
     }
+  });
+
+// ============================================================================
+// design - Interactive session to shape memory
+// ============================================================================
+
+program
+  .command('design')
+  .description('Interactive session with the AI Architect to shape project memory')
+  .option('-p, --project <path>', 'Filter to specific project path')
+  .option('--model <name>', 'Model to use', 'google/gemini-3-flash-preview')
+  .action(async (options) => {
+    const apiKey = process.env.LLM_API_KEY || process.env.OPENROUTER_API_KEY || process.env.OPENAI_API_KEY;
+    if (!apiKey) {
+      console.error('❌ No API key found. Set LLM_API_KEY, OPENROUTER_API_KEY, or OPENAI_API_KEY in .env or environment');
+      process.exit(1);
+    }
+
+    let projectFilter = options.project;
+    const cwd = process.cwd();
+    const cwdSanitized = cwd.replace(/\//g, '-').replace(/^-/, '');
+
+    if (!projectFilter) {
+      const index = loadMemoryIndex();
+      projectFilter = Object.keys(index.projects).find(p =>
+        p === cwdSanitized || p.endsWith(cwdSanitized) || cwdSanitized.endsWith(p.replace(/^-/, ''))
+      );
+    }
+
+    if (!projectFilter) {
+      console.error('❌ Could not detect project. Please run `claude-prose evolve` first or specify --project');
+      process.exit(1);
+    }
+
+    const memory = loadProjectMemory(projectFilter);
+    if (!memory) {
+      console.error(`❌ No memory found for project: ${projectFilter}`);
+      process.exit(1);
+    }
+
+    await startDesignSession(projectFilter, memory, {
+      apiKey,
+      model: options.model,
+    });
   });
 
 // ============================================================================
