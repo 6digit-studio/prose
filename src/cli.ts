@@ -214,8 +214,8 @@ program
         const matchingProject = projectDirs.find(p => {
           const dirName = p.replace(/^-/, '');
           return dirName === cwdSanitized ||
-                 dirName.endsWith(cwdSanitized) ||
-                 cwdSanitized.endsWith(dirName);
+            dirName.endsWith(cwdSanitized) ||
+            cwdSanitized.endsWith(dirName);
         });
 
         if (matchingProject) {
@@ -235,13 +235,12 @@ program
     // First pass: FAST check using file size (no parsing!)
     // Separate into: needs actual work vs just needs fileSize backfill
     const sessionsNeedingWork: typeof sessions = [];
-    const sessionsNeedingBackfill: typeof sessions = [];
     const trace = options.trace;
 
     for (const session of sessions) {
       // Skip zero-size files
       if (session.fileSize === 0) {
-        if (trace) console.log(`  [TRACE] ${session.sessionId.slice(0,8)}: skip (zero-size file)`);
+        if (trace) console.log(`  [TRACE] ${session.sessionId.slice(0, 8)}: skip (zero-size file)`);
         continue;
       }
 
@@ -251,36 +250,20 @@ program
 
       if (!state) {
         // Never processed - needs work
-        if (trace) console.log(`  [TRACE] ${session.sessionId.slice(0,8)}: NEW (no prior state)`);
+        if (trace) console.log(`  [TRACE] ${session.sessionId.slice(0, 8)}: NEW (no prior state)`);
         sessionsNeedingWork.push(session);
       } else if (!state.fileSize) {
-        // Processed before fileSize tracking - needs backfill (not real work)
-        if (trace) console.log(`  [TRACE] ${session.sessionId.slice(0,8)}: BACKFILL (has messageCount=${state.messageCount}, no fileSize)`);
-        sessionsNeedingBackfill.push(session);
+        // Processed before fileSize tracking - needs update to establish baseline
+        if (trace) console.log(`  [TRACE] ${session.sessionId.slice(0, 8)}: baseline (has messageCount=${state.messageCount}, no fileSize)`);
+        sessionsNeedingWork.push(session);
       } else if (session.fileSize > state.fileSize) {
         // File grew - has new content
-        if (trace) console.log(`  [TRACE] ${session.sessionId.slice(0,8)}: UPDATED (fileSize ${state.fileSize} -> ${session.fileSize})`);
+        if (trace) console.log(`  [TRACE] ${session.sessionId.slice(0, 8)}: UPDATED (fileSize ${state.fileSize} -> ${session.fileSize})`);
         sessionsNeedingWork.push(session);
       } else {
         // Already processed and up to date
-        if (trace) console.log(`  [TRACE] ${session.sessionId.slice(0,8)}: skip (up to date)`);
+        if (trace) console.log(`  [TRACE] ${session.sessionId.slice(0, 8)}: skip (up to date)`);
       }
-    }
-
-    // Do backfills first (unlimited - these are cheap)
-    if (sessionsNeedingBackfill.length > 0) {
-      if (trace) console.log(`\n  [TRACE] === Backfilling ${sessionsNeedingBackfill.length} sessions ===`);
-      for (const session of sessionsNeedingBackfill) {
-        const memory = loadProjectMemory(session.project);
-        if (!memory) continue; // shouldn't happen, but be safe
-        const state = getSessionProcessingState(memory, session.sessionId);
-        if (state && !state.fileSize) {
-          state.fileSize = session.fileSize;
-          saveProjectMemory(memory);
-          if (trace) console.log(`  [TRACE] backfilled ${session.sessionId.slice(0,8)} fileSize=${session.fileSize}`);
-        }
-      }
-      console.log(`📋 Backfilled fileSize for ${sessionsNeedingBackfill.length} previously processed sessions`);
     }
 
     // Sort actual work oldest-first for temporal evolution, then apply limit
@@ -359,7 +342,18 @@ program
       }
 
       if (messagesToProcess.length === 0) {
-        console.log('   ⚠️  No messages, skipping');
+        if (trace) console.log('  [TRACE] -> NO MESSAGES: updating metadata to skip next time');
+        // Update metadata anyway so we don't keep picking this session up as "new/unprocessed"
+        memory = updateProjectMemory(
+          memory,
+          emptyFragments(), // Start with empty if it's new and empty
+          session.sessionId,
+          [],
+          totalMessageCount,
+          session.modifiedTime,
+          session.fileSize
+        );
+        saveProjectMemory(memory);
         continue;
       }
 
@@ -441,6 +435,9 @@ program
     console.log('\n📊 Summary:');
     console.log(`   Found: ${sessions.length} sessions, ${sessionsNeedingWork.length} need updates`);
     console.log(`   Processed: ${processed} sessions`);
+    if (sessionsNeedingWork.length > sessionsToProcess.length) {
+      console.log(`   ⏳ Remaining: ${sessionsNeedingWork.length - sessionsToProcess.length} sessions need work (limit reached)`);
+    }
     console.log(`   Tokens used: ${totalTokens}`);
 
     // Run horizontal evolution if we processed any sessions
