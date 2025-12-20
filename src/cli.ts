@@ -37,6 +37,7 @@ import {
   getMemoryDir,
   generateContextMarkdown,
   writeContextFile,
+  exportSessionArtifacts,
 } from './memory.js';
 import { evolveHorizontal } from './horizontal.js';
 import { generateWebsite } from './web.js';
@@ -193,6 +194,8 @@ program
   .option('--no-git', 'Exclude git commits')
   .option('--antigravity', 'Include Antigravity artifacts in evolution', true)
   .option('--no-antigravity', 'Exclude Antigravity artifacts')
+  .option('--artifacts', 'Export per-session Markdown artifacts', true)
+  .option('--no-artifacts', 'Disable per-session artifact export')
   .action(async (options) => {
     const apiKey = process.env.LLM_API_KEY || process.env.OPENROUTER_API_KEY || process.env.OPENAI_API_KEY;
     if (!apiKey) {
@@ -476,6 +479,11 @@ program
 
       processed++;
       console.log(`   ✅ Evolved (${windows.length} windows, ${totalTokens} tokens total)`);
+
+      if (options.artifacts && !options.dryRun) {
+        const artifactsDir = join(process.cwd(), '.claude', 'prose');
+        exportSessionArtifacts(projectName, artifactsDir);
+      }
     }
 
     // Save index
@@ -901,7 +909,46 @@ program
   });
 
 // ============================================================================
-// Parse and run
+// artifacts - Export per-session artifacts
 // ============================================================================
+
+program
+  .command('artifacts')
+  .description('Export all session fragments as Markdown artifacts')
+  .option('-p, --project <path>', 'Project name or path')
+  .action(async (options) => {
+    let projectName = options.project;
+    if (!projectName) {
+      const cwd = process.cwd();
+      const cwdSanitized = cwd.replace(/\//g, '-').replace(/^-/, '');
+      const projectsDir = getClaudeProjectsDir();
+
+      if (existsSync(projectsDir)) {
+        const projectDirs = readdirSync(projectsDir, { withFileTypes: true })
+          .filter(d => d.isDirectory())
+          .map(d => d.name);
+
+        const matchingProject = projectDirs.find(p => {
+          const dirName = p.replace(/^-/, '');
+          return dirName === cwdSanitized ||
+            dirName.endsWith(cwdSanitized) ||
+            cwdSanitized.endsWith(dirName);
+        });
+
+        if (matchingProject) {
+          projectName = matchingProject;
+        } else {
+          projectName = cwdSanitized;
+        }
+      } else {
+        projectName = cwdSanitized;
+      }
+    }
+
+    console.log(`📦 Exporting artifacts for ${projectName}...`);
+    const artifactsDir = join(process.cwd(), '.claude', 'prose');
+    const count = exportSessionArtifacts(projectName, artifactsDir);
+    console.log(`✅ Exported ${count} artifacts to ${artifactsDir}`);
+  });
 
 program.parse();

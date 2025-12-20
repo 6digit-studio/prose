@@ -247,10 +247,10 @@ export function updateProjectMemory(
 
   const processedSessions = existingIndex >= 0
     ? [
-        ...memory.processedSessions.slice(0, existingIndex),
-        newState,
-        ...memory.processedSessions.slice(existingIndex + 1),
-      ]
+      ...memory.processedSessions.slice(0, existingIndex),
+      newState,
+      ...memory.processedSessions.slice(existingIndex + 1),
+    ]
     : [...memory.processedSessions, newState];
 
   // Update or add session snapshot
@@ -263,10 +263,10 @@ export function updateProjectMemory(
 
   const sessionSnapshots = snapshotIndex >= 0
     ? [
-        ...(memory.sessionSnapshots || []).slice(0, snapshotIndex),
-        newSnapshot,
-        ...(memory.sessionSnapshots || []).slice(snapshotIndex + 1),
-      ]
+      ...(memory.sessionSnapshots || []).slice(0, snapshotIndex),
+      newSnapshot,
+      ...(memory.sessionSnapshots || []).slice(snapshotIndex + 1),
+    ]
     : [...(memory.sessionSnapshots || []), newSnapshot];
 
   return {
@@ -649,6 +649,137 @@ export function generateContextMarkdown(projectName: string): string | null {
   }
 
   return lines.join('\n');
+}
+
+/**
+ * Generate a Markdown summary for a single session snapshot
+ */
+export function generateSessionMarkdown(snapshot: { sessionId: string; timestamp: Date | string; fragments: AllFragments }, projectName: string): string {
+  const date = new Date(snapshot.timestamp);
+  const dateStr = date.toLocaleDateString('en-US', {
+    weekday: 'long',
+    month: 'long',
+    day: 'numeric',
+    year: 'numeric',
+  });
+  const timeStr = date.toLocaleTimeString('en-US', {
+    hour: 'numeric',
+    minute: '2-digit',
+  });
+
+  const lines: string[] = [
+    `# Session Snapshot: ${snapshot.sessionId.slice(0, 8)}`,
+    '',
+    `**Project:** ${projectName.replace(/^-Users-[^-]+-src-/, '')}`,
+    `**Date:** ${dateStr} at ${timeStr}`,
+    `**Session ID:** \`${snapshot.sessionId}\``,
+    '',
+  ];
+
+  // Focus
+  const focus = snapshot.fragments.focus;
+  if (focus?.current_goal) {
+    const focusEmoji = focus.current_goal.toLowerCase().includes('fix') ? '🔧' :
+      focus.current_goal.toLowerCase().includes('feat') ? '✨' : '🎯';
+    lines.push(`## ${focusEmoji} Focus`);
+    lines.push('');
+    lines.push(`**Goal:** ${focus.current_goal}`);
+    if (focus.active_tasks?.length) {
+      lines.push('');
+      lines.push('**Active tasks:**');
+      for (const task of focus.active_tasks) {
+        lines.push(`- ${task}`);
+      }
+    }
+    if (focus.blockers?.length) {
+      lines.push('');
+      lines.push('**Blockers:**');
+      for (const blocker of focus.blockers) {
+        lines.push(`- ⚠️ ${blocker}`);
+      }
+    }
+    lines.push('');
+  }
+
+  // Story Beats
+  const beats = snapshot.fragments.narrative?.story_beats || [];
+  if (beats.length) {
+    lines.push('## 📖 The Story');
+    lines.push('');
+    for (const beat of beats) {
+      const typeStr = beat.beat_type ? `[${beat.beat_type.toUpperCase()}] ` : '';
+      lines.push(`- ${typeStr}${beat.summary}${beat.emotional_tone ? ` *(${beat.emotional_tone})*` : ''}`);
+    }
+    lines.push('');
+  }
+
+  // Quotes
+  const quotes = snapshot.fragments.narrative?.memorable_quotes || [];
+  if (quotes.length) {
+    lines.push('## 💬 Memorable Quotes');
+    lines.push('');
+    for (const q of quotes) {
+      lines.push(`> "${q.quote}"`);
+      lines.push(`> — *${q.speaker}*`);
+      lines.push('');
+    }
+  }
+
+  // Decisions
+  const decisions = snapshot.fragments.decisions?.decisions || [];
+  if (decisions.length) {
+    lines.push('## ⚖️ Decisions Made');
+    lines.push('');
+    for (const d of decisions) {
+      lines.push(`### ${d.what}`);
+      lines.push('');
+      lines.push(`**Why:** ${d.why}`);
+      lines.push(`**Confidence:** ${d.confidence}`);
+      lines.push('');
+    }
+  }
+
+  // Insights
+  const insights = snapshot.fragments.insights?.insights || [];
+  const gotchas = snapshot.fragments.insights?.gotchas || [];
+  if (insights.length || gotchas.length) {
+    lines.push('## 💡 Insights & Gotchas');
+    lines.push('');
+    for (const i of insights) {
+      lines.push(`- **Learning:** ${i.learning}`);
+      if (i.context) lines.push(`  - *Context:* ${i.context}`);
+    }
+    for (const g of gotchas) {
+      lines.push(`- ⚠️ **Issue:** ${g.issue}`);
+      if (g.solution) lines.push(`  - *Solution:* ${g.solution}`);
+    }
+    lines.push('');
+  }
+
+  return lines.join('\n');
+}
+
+/**
+ * Export all session snapshots as Markdown files to a directory
+ */
+export function exportSessionArtifacts(projectName: string, outputDir: string): number {
+  const memory = loadProjectMemory(projectName);
+  if (!memory || !memory.sessionSnapshots) return 0;
+
+  if (!existsSync(outputDir)) {
+    mkdirSync(outputDir, { recursive: true });
+  }
+
+  let count = 0;
+  for (const snapshot of memory.sessionSnapshots) {
+    const filename = `session-${snapshot.sessionId.slice(0, 8)}.md`;
+    const outputPath = join(outputDir, filename);
+    const markdown = generateSessionMarkdown(snapshot, projectName);
+    writeFileSync(outputPath, markdown);
+    count++;
+  }
+
+  return count;
 }
 
 /**
