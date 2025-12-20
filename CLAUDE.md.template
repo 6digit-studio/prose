@@ -1,0 +1,24 @@
+# Claude Prose - Development Guide
+
+## Project Awareness
+{{PROSE_SUMMARY}}
+
+## Critical Decisions
+{{PROSE_DECISIONS}}
+
+## Project Insights
+{{PROSE_INSIGHTS}}
+
+## Active Gotchas
+{{PROSE_GOTCHAS}}
+
+## Tech Stack
+- Bun (Runtime & Test)
+- TypeScript
+- Commander.js (CLI)
+- Gemini 3 Flash (via AI SDK)
+
+## Development Workflow
+- Build: `npm run build`
+- Evolve memory: `node dist/cli.js evolve`
+- Test: `bun test`

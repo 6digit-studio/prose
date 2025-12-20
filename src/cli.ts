@@ -42,6 +42,7 @@ import {
 import { evolveHorizontal } from './horizontal.js';
 import { generateWebsite } from './web.js';
 import { getGitCommits, isGitRepo, getAntigravityBrains, getAntigravityArtifacts, parseAntigravityArtifact, matchBrainToProject, getLatestGitCommitDate } from './source-parsers.js';
+import { injectMemory } from './injector.js';
 
 const program = new Command();
 
@@ -519,6 +520,12 @@ program
 
         const updated = updateCurrentFragments(memory, result.current);
         saveProjectMemory(updated);
+
+        // Update CLAUDE.md from template if it exists and matches cwd
+        const cwdSanitized = process.cwd().replace(/\//g, '-').replace(/^-/, '');
+        if (projectName === cwdSanitized || projectName.endsWith(`-${cwdSanitized}`)) {
+          injectMemory(process.cwd(), updated);
+        }
 
         console.log(`   ${projectName.replace(/^-Users-[^-]+-src-/, '')}: ${result.sessionsIncluded} sessions → current`);
         if (result.musings) {
