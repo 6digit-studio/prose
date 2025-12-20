@@ -12,7 +12,7 @@
 // Load .env file if present (check multiple locations)
 import { config } from 'dotenv';
 import { homedir } from 'os';
-import { join } from 'path';
+import { join, basename } from 'path';
 import { existsSync, mkdirSync, writeFileSync, readdirSync } from 'fs';
 config({ quiet: true });  // Load from current directory
 config({ path: join(homedir(), '.config', 'claude-prose', '.env'), quiet: true });  // Global config
@@ -40,6 +40,7 @@ import {
 } from './memory.js';
 import { evolveHorizontal } from './horizontal.js';
 import { generateWebsite } from './web.js';
+import { getGitCommits, isGitRepo, getAntigravityBrains, getAntigravityArtifacts, parseAntigravityArtifact, matchBrainToProject, getLatestGitCommitDate } from './source-parsers.js';
 
 const program = new Command();
 
@@ -188,6 +189,10 @@ program
   .option('--dry-run', 'Show what would be processed without making changes')
   .option('-v, --verbose', 'Show detailed progress')
   .option('--trace', 'Show detailed decision tracing for debugging')
+  .option('--git', 'Include git commits in evolution', true)
+  .option('--no-git', 'Exclude git commits')
+  .option('--antigravity', 'Include Antigravity artifacts in evolution', true)
+  .option('--no-antigravity', 'Exclude Antigravity artifacts')
   .action(async (options) => {
     const apiKey = process.env.LLM_API_KEY || process.env.OPENROUTER_API_KEY || process.env.OPENAI_API_KEY;
     if (!apiKey) {
@@ -227,6 +232,38 @@ program
 
     // Discover sessions
     const sessions = discoverSessionFiles(projectFilter);
+
+    // Add Git if requested
+    if (options.git) {
+      const cwd = process.cwd();
+      if (isGitRepo(cwd)) {
+        const repoName = cwd.split('/').pop() || 'repo';
+        const project = projectFilter || cwd.replace(/\//g, '-').replace(/^-/, '');
+        sessions.push({
+          path: cwd,
+          sessionId: `git-${repoName}`,
+          project,
+          modifiedTime: getLatestGitCommitDate(cwd),
+          fileSize: 1000, // Placeholder
+          sourceType: 'git',
+        });
+      }
+    }
+
+    // Add Antigravity if requested
+    if (options.antigravity && projectFilter) {
+      const brains = getAntigravityBrains();
+      const matchingBrains = brains.filter(b => matchBrainToProject(b, projectFilter!));
+
+      for (const brain of matchingBrains) {
+        const artifacts = getAntigravityArtifacts(brain);
+        for (const art of artifacts) {
+          // Tag as antigravity sourceType
+          sessions.push({ ...art, sourceType: 'antigravity' });
+        }
+      }
+    }
+
     const limit = parseInt(options.limit, 10);
 
     // Load memory index
@@ -256,9 +293,9 @@ program
         // Processed before fileSize tracking - needs update to establish baseline
         if (trace) console.log(`  [TRACE] ${session.sessionId.slice(0, 8)}: baseline (has messageCount=${state.messageCount}, no fileSize)`);
         sessionsNeedingWork.push(session);
-      } else if (session.fileSize > state.fileSize) {
-        // File grew - has new content
-        if (trace) console.log(`  [TRACE] ${session.sessionId.slice(0, 8)}: UPDATED (fileSize ${state.fileSize} -> ${session.fileSize})`);
+      } else if (session.fileSize > state.fileSize || options.force) {
+        // File grew or force reprocess
+        if (trace) console.log(`  [TRACE] ${session.sessionId.slice(0, 8)}: ${options.force ? 'FORCE' : 'UPDATED'} (fileSize ${state.fileSize} -> ${session.fileSize})`);
         sessionsNeedingWork.push(session);
       } else {
         // Already processed and up to date
@@ -297,7 +334,21 @@ program
         console.log(`  [TRACE] session: fileSize=${session.fileSize}`);
       }
 
-      if (prevState?.fileSize && prevState.fileSize < session.fileSize) {
+      if (session.sourceType === 'git') {
+        const commits = getGitCommits(session.path);
+        totalMessageCount = commits.length;
+        messagesToProcess = prevState ? commits.slice(prevState.messageCount) : commits;
+        if (messagesToProcess.length > 0) {
+          console.log(`📖 Syncing git commits... (+${messagesToProcess.length} new commits)`);
+        }
+      } else if (session.sourceType === 'antigravity') {
+        const artifactMessages = parseAntigravityArtifact(session.path, session.sessionId, projectName);
+        totalMessageCount = artifactMessages.length;
+        messagesToProcess = prevState ? artifactMessages.slice(prevState.messageCount) : artifactMessages;
+        if (messagesToProcess.length > 0) {
+          console.log(`📖 Ingesting Antigravity artifact: ${basename(session.path)}...`);
+        }
+      } else if (prevState?.fileSize && prevState.fileSize < session.fileSize) {
         // FAST PATH: Only read new bytes from the file
         if (trace) console.log(`  [TRACE] -> FAST PATH: byte-offset read from ${prevState.fileSize}`);
         const newMessages = parseSessionFileFromOffset(

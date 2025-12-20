@@ -35,6 +35,8 @@ export interface Conversation {
   endTime: Date;
 }
 
+export type SourceType = 'claude-code' | 'git' | 'antigravity';
+
 export interface SessionFile {
   path: string;
   sessionId: string;
@@ -42,6 +44,8 @@ export interface SessionFile {
   modifiedTime: Date;
   /** File size in bytes (for fast append-only change detection) */
   fileSize: number;
+  /** Type of source */
+  sourceType?: SourceType;
 }
 
 // Raw JSONL line types (as they appear in the file)
@@ -49,7 +53,7 @@ interface RawUserMessage {
   type: 'user';
   message: {
     role: 'user';
-    content: string | Array<{ type: string; text?: string; [key: string]: unknown }>;
+    content: string | Array<{ type: string; text?: string;[key: string]: unknown }>;
   };
   uuid: string;
   timestamp: string;
@@ -62,7 +66,7 @@ interface RawAssistantMessage {
   type: 'assistant';
   message: {
     role: 'assistant';
-    content: Array<{ type: 'text'; text: string } | { type: 'tool_use'; [key: string]: unknown }>;
+    content: Array<{ type: 'text'; text: string } | { type: 'tool_use';[key: string]: unknown }>;
   };
   uuid: string;
   parentUuid: string;
@@ -114,7 +118,7 @@ export function discoverSessionFiles(projectPath?: string): SessionFile[] {
       // Exact match (full path) or exact project name match (ends with -projectname)
       const isExactMatch = dirName === normalizedProjectPath;
       const isProjectNameMatch = dirName.endsWith(`-${normalizedProjectPath}`) ||
-                                  dirName === normalizedProjectPath;
+        dirName === normalizedProjectPath;
 
       if (!isExactMatch && !isProjectNameMatch) {
         continue;
@@ -134,6 +138,7 @@ export function discoverSessionFiles(projectPath?: string): SessionFile[] {
         project: projectDir.name,
         modifiedTime: stats.mtime,
         fileSize: stats.size,
+        sourceType: 'claude-code',
       });
     }
   }
@@ -149,7 +154,7 @@ export function discoverSessionFiles(projectPath?: string): SessionFile[] {
 /**
  * Extract text content from message content (handles both string and array formats)
  */
-function extractTextContent(content: string | Array<{ type: string; text?: string; [key: string]: unknown }>): string {
+function extractTextContent(content: string | Array<{ type: string; text?: string;[key: string]: unknown }>): string {
   // If it's already a string, return it
   if (typeof content === 'string') {
     return content;

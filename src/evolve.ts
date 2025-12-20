@@ -5,7 +5,7 @@
  * are processed. Each fragment sees its own previous state and produces
  * an updated version - evolution, not extraction.
  *
- * Uses a cheap LLM (Gemini 2.5 Flash via OpenRouter) for fast, affordable
+ * Uses a cheap LLM (Gemini 3 Flash via OpenRouter) for fast, affordable
  * compression of conversation into structured memory.
  */
 
@@ -130,7 +130,7 @@ ${formatMessages(context.messages)}
 Evolve the decisions based on the new messages. The schema describes what we need.`;
 
     const { object, usage } = await generateObject({
-      model: client(config.model || 'google/gemini-2.5-flash'),
+      model: client(config.model || 'google/gemini-3-flash-preview'),
       schema: DecisionSchema,
       prompt: systemPrompt,
       temperature: config.temperature ?? 0.3,
@@ -180,7 +180,7 @@ ${formatMessages(context.messages)}
 Evolve the insights based on the new messages. The schema describes what we need.`;
 
     const { object, usage } = await generateObject({
-      model: client(config.model || 'google/gemini-2.5-flash'),
+      model: client(config.model || 'google/gemini-3-flash-preview'),
       schema: InsightSchema,
       prompt: systemPrompt,
       temperature: config.temperature ?? 0.3,
@@ -231,7 +231,7 @@ This fragment is EPHEMERAL - it reflects the current state, not history.
 Update completely based on what the conversation shows as the current focus.`;
 
     const { object, usage } = await generateObject({
-      model: client(config.model || 'google/gemini-2.5-flash'),
+      model: client(config.model || 'google/gemini-3-flash-preview'),
       schema: FocusSchema,
       prompt: systemPrompt,
       temperature: config.temperature ?? 0.3,

@@ -100,7 +100,7 @@ ${formatFragmentsForEvolution(snapshots)}
 Evolve these into the current state. The schema describes what we need.`;
 
   const { object, usage } = await generateObject({
-    model: client(config.model || 'google/gemini-2.5-flash'),
+    model: client(config.model || 'google/gemini-3-flash-preview'),
     schema: DecisionSchema,
     prompt,
     temperature: 0.3,
@@ -128,7 +128,7 @@ ${formatFragmentsForEvolution(snapshots)}
 Evolve these into the current state. The schema describes what we need.`;
 
   const { object, usage } = await generateObject({
-    model: client(config.model || 'google/gemini-2.5-flash'),
+    model: client(config.model || 'google/gemini-3-flash-preview'),
     schema: InsightSchema,
     prompt,
     temperature: 0.3,
@@ -156,7 +156,7 @@ ${formatFragmentsForEvolution(snapshots)}
 The most recent session's focus is likely most relevant, but synthesize if needed.`;
 
   const { object, usage } = await generateObject({
-    model: client(config.model || 'google/gemini-2.5-flash'),
+    model: client(config.model || 'google/gemini-3-flash-preview'),
     schema: FocusSchema,
     prompt,
     temperature: 0.3,
@@ -184,7 +184,7 @@ ${formatFragmentsForEvolution(snapshots)}
 Focus on the overall arc, key moments, and memorable quotes.`;
 
   const { object, usage } = await generateObject({
-    model: client(config.model || 'google/gemini-2.5-flash'),
+    model: client(config.model || 'google/gemini-3-flash-preview'),
     schema: NarrativeSchema,
     prompt,
     temperature: 0.5,
