@@ -196,6 +196,7 @@ const dashboardHtml = `
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Claude Prose Dashboard</title>
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
   <style>
     :root {
       --bg: #0d1117;
@@ -552,6 +553,55 @@ const dashboardHtml = `
     }
 
     .session-card.expanded .expand-icon { transform: rotate(90deg); }
+
+    /* Markdown styles */
+    .markdown-content code {
+      background: var(--bg);
+      padding: 0.15rem 0.35rem;
+      border-radius: 4px;
+      font-family: 'SF Mono', Monaco, monospace;
+      font-size: 0.85em;
+    }
+
+    .markdown-content pre {
+      background: var(--bg);
+      padding: 0.75rem 1rem;
+      border-radius: 6px;
+      overflow-x: auto;
+      margin: 0.5rem 0;
+    }
+
+    .markdown-content pre code {
+      padding: 0;
+      background: none;
+    }
+
+    .markdown-content p { margin: 0.5rem 0; }
+    .markdown-content p:first-child { margin-top: 0; }
+    .markdown-content p:last-child { margin-bottom: 0; }
+
+    .markdown-content ul, .markdown-content ol {
+      margin: 0.5rem 0;
+      padding-left: 1.5rem;
+    }
+
+    .markdown-content li { margin: 0.25rem 0; }
+
+    .markdown-content a {
+      color: var(--accent);
+      text-decoration: none;
+    }
+
+    .markdown-content a:hover { text-decoration: underline; }
+
+    .markdown-content blockquote {
+      border-left: 3px solid var(--purple);
+      padding-left: 1rem;
+      margin: 0.5rem 0;
+      color: var(--text-muted);
+    }
+
+    .markdown-content strong { color: var(--text); }
   </style>
 </head>
 <body>
@@ -588,6 +638,12 @@ const dashboardHtml = `
     let currentTab = 'decisions';
     let projectData = null;
     let sessionsData = [];
+
+    // Markdown helper - renders inline markdown safely
+    function md(text) {
+      if (!text) return '';
+      return marked.parse(text, { breaks: true });
+    }
 
     // Load projects
     async function loadProjects() {
@@ -654,7 +710,7 @@ const dashboardHtml = `
 
       // Show musings if on decisions tab
       if (currentTab === 'decisions' && projectData.musings) {
-        html += \`<div class="musings-box">\${projectData.musings}</div>\`;
+        html += \`<div class="musings-box markdown-content">\${md(projectData.musings)}</div>\`;
       }
 
       const items = projectData[currentTab] || [];
@@ -705,7 +761,7 @@ const dashboardHtml = `
               </div>
             </div>
             <div class="session-body">
-              \${session.musings ? \`<div class="musings-box">\${session.musings}</div>\` : ''}
+              \${session.musings ? \`<div class="musings-box markdown-content">\${md(session.musings)}</div>\` : ''}
 
               \${session.beats.length ? \`
                 <div class="session-section">
@@ -723,9 +779,9 @@ const dashboardHtml = `
                 <div class="session-section">
                   <div class="session-section-title">Decisions</div>
                   \${session.decisions.map(d => \`
-                    <div class="session-fragment">
-                      <strong>\${d.what}</strong>
-                      <div style="color: var(--text-muted); margin-top: 0.25rem;">\${d.why}</div>
+                    <div class="session-fragment markdown-content">
+                      <strong>\${md(d.what)}</strong>
+                      <div style="color: var(--text-muted); margin-top: 0.25rem;">\${md(d.why)}</div>
                     </div>
                   \`).join('')}
                 </div>
@@ -735,7 +791,7 @@ const dashboardHtml = `
                 <div class="session-section">
                   <div class="session-section-title">Insights</div>
                   \${session.insights.map(i => \`
-                    <div class="session-fragment">\${i.learning}</div>
+                    <div class="session-fragment markdown-content">\${md(i.learning)}</div>
                   \`).join('')}
                 </div>
               \` : ''}
@@ -744,9 +800,9 @@ const dashboardHtml = `
                 <div class="session-section">
                   <div class="session-section-title">Gotchas</div>
                   \${session.gotchas.map(g => \`
-                    <div class="session-fragment">
-                      <strong>\${g.issue}</strong>
-                      \${g.solution ? \`<div style="color: var(--green); margin-top: 0.25rem;">💡 \${g.solution}</div>\` : ''}
+                    <div class="session-fragment markdown-content">
+                      <strong>\${md(g.issue)}</strong>
+                      \${g.solution ? \`<div style="color: var(--green); margin-top: 0.25rem;">💡 \${md(g.solution)}</div>\` : ''}
                     </div>
                   \`).join('')}
                 </div>
@@ -790,8 +846,8 @@ const dashboardHtml = `
               <span><span class="type-icon">\${icon}</span> <span class="fragment-badge \${badgeClass}">\${item.confidence}</span></span>
               <span class="fragment-id" data-id="\${item.id}">\${item.id}</span>
             </div>
-            <div class="fragment-content">\${item.what}</div>
-            <div class="fragment-context">\${item.why}</div>
+            <div class="fragment-content markdown-content">\${md(item.what)}</div>
+            <div class="fragment-context markdown-content">\${md(item.why)}</div>
           </div>
         \`;
       } else if (item.type === 'insight') {
@@ -801,8 +857,8 @@ const dashboardHtml = `
               <span class="type-icon">\${icon}</span>
               <span class="fragment-id" data-id="\${item.id}">\${item.id}</span>
             </div>
-            <div class="fragment-content">\${item.learning}</div>
-            \${item.context ? \`<div class="fragment-context">\${item.context}</div>\` : ''}
+            <div class="fragment-content markdown-content">\${md(item.learning)}</div>
+            \${item.context ? \`<div class="fragment-context markdown-content">\${md(item.context)}</div>\` : ''}
           </div>
         \`;
       } else if (item.type === 'gotcha') {
@@ -812,8 +868,8 @@ const dashboardHtml = `
               <span class="type-icon">\${icon}</span>
               <span class="fragment-id" data-id="\${item.id}">\${item.id}</span>
             </div>
-            <div class="fragment-content">\${item.issue}</div>
-            \${item.solution ? \`<div class="fragment-context">💡 \${item.solution}</div>\` : ''}
+            <div class="fragment-content markdown-content">\${md(item.issue)}</div>
+            \${item.solution ? \`<div class="fragment-context markdown-content">💡 \${md(item.solution)}</div>\` : ''}
           </div>
         \`;
       } else if (item.type === 'quote') {
@@ -888,8 +944,8 @@ const dashboardHtml = `
                 <span>\${r.project}</span>
                 <span class="fragment-id" data-id="\${r.id}">\${r.id}</span>
               </div>
-              <div class="fragment-content">\${r.content}</div>
-              \${r.context ? \`<div class="fragment-context">\${r.context}</div>\` : ''}
+              <div class="fragment-content markdown-content">\${md(r.content)}</div>
+              \${r.context ? \`<div class="fragment-context markdown-content">\${md(r.context)}</div>\` : ''}
             </div>
           \`;
         }).join('');

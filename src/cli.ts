@@ -13,12 +13,12 @@
 import { config } from 'dotenv';
 import { homedir } from 'os';
 import { join } from 'path';
-import { existsSync, mkdirSync, writeFileSync } from 'fs';
+import { existsSync, mkdirSync, writeFileSync, readdirSync } from 'fs';
 config({ quiet: true });  // Load from current directory
 config({ path: join(homedir(), '.config', 'claude-prose', '.env'), quiet: true });  // Global config
 
 import { Command } from 'commander';
-import { discoverSessionFiles, parseSessionFile, parseSessionFileFromOffset, getSessionStats } from './session-parser.js';
+import { discoverSessionFiles, parseSessionFile, parseSessionFileFromOffset, getSessionStats, getClaudeProjectsDir } from './session-parser.js';
 import { evolveAllFragments } from './evolve.js';
 import { emptyFragments } from './schemas.js';
 import {
@@ -187,6 +187,7 @@ program
   .option('-f, --force', 'Reprocess already-processed sessions')
   .option('--dry-run', 'Show what would be processed without making changes')
   .option('-v, --verbose', 'Show detailed progress')
+  .option('--trace', 'Show detailed decision tracing for debugging')
   .action(async (options) => {
     const apiKey = process.env.LLM_API_KEY || process.env.OPENROUTER_API_KEY || process.env.OPENAI_API_KEY;
     if (!apiKey) {
@@ -201,13 +202,26 @@ program
     if (!projectFilter) {
       const cwd = process.cwd();
       const cwdSanitized = cwd.replace(/\//g, '-').replace(/^-/, '');
-      const index = loadMemoryIndex();
-      const matchingProject = Object.keys(index.projects).find(p =>
-        p === cwdSanitized || p.endsWith(cwdSanitized) || cwdSanitized.endsWith(p.replace(/^-/, ''))
-      );
-      if (matchingProject) {
-        projectFilter = matchingProject;
-        console.log(`📁 Evolving: ${matchingProject.replace(/^-Users-[^-]+-src-/, '')}\n`);
+
+      // Check for matching project directory in Claude's projects folder
+      // This works even for new projects that haven't been processed yet
+      const projectsDir = getClaudeProjectsDir();
+      if (existsSync(projectsDir)) {
+        const projectDirs = readdirSync(projectsDir, { withFileTypes: true })
+          .filter(d => d.isDirectory())
+          .map(d => d.name);
+
+        const matchingProject = projectDirs.find(p => {
+          const dirName = p.replace(/^-/, '');
+          return dirName === cwdSanitized ||
+                 dirName.endsWith(cwdSanitized) ||
+                 cwdSanitized.endsWith(dirName);
+        });
+
+        if (matchingProject) {
+          projectFilter = matchingProject;
+          console.log(`📁 Evolving: ${matchingProject.replace(/^-Users-[^-]+-src-/, '')}\n`);
+        }
       }
     }
 
@@ -219,21 +233,57 @@ program
     const index = loadMemoryIndex();
 
     // First pass: FAST check using file size (no parsing!)
+    // Separate into: needs actual work vs just needs fileSize backfill
     const sessionsNeedingWork: typeof sessions = [];
+    const sessionsNeedingBackfill: typeof sessions = [];
+    const trace = options.trace;
+
     for (const session of sessions) {
       // Skip zero-size files
-      if (session.fileSize === 0) continue;
+      if (session.fileSize === 0) {
+        if (trace) console.log(`  [TRACE] ${session.sessionId.slice(0,8)}: skip (zero-size file)`);
+        continue;
+      }
 
       // Load project memory for fast check
       const memory = loadProjectMemory(session.project);
+      const state = getSessionProcessingState(memory, session.sessionId);
 
-      // Fast check: compare file size (append-only JSONL)
-      if (options.force || sessionNeedsProcessingFast(memory, session.sessionId, session.fileSize)) {
+      if (!state) {
+        // Never processed - needs work
+        if (trace) console.log(`  [TRACE] ${session.sessionId.slice(0,8)}: NEW (no prior state)`);
         sessionsNeedingWork.push(session);
+      } else if (!state.fileSize) {
+        // Processed before fileSize tracking - needs backfill (not real work)
+        if (trace) console.log(`  [TRACE] ${session.sessionId.slice(0,8)}: BACKFILL (has messageCount=${state.messageCount}, no fileSize)`);
+        sessionsNeedingBackfill.push(session);
+      } else if (session.fileSize > state.fileSize) {
+        // File grew - has new content
+        if (trace) console.log(`  [TRACE] ${session.sessionId.slice(0,8)}: UPDATED (fileSize ${state.fileSize} -> ${session.fileSize})`);
+        sessionsNeedingWork.push(session);
+      } else {
+        // Already processed and up to date
+        if (trace) console.log(`  [TRACE] ${session.sessionId.slice(0,8)}: skip (up to date)`);
       }
     }
 
-    // Sort oldest-first for temporal evolution, then apply limit
+    // Do backfills first (unlimited - these are cheap)
+    if (sessionsNeedingBackfill.length > 0) {
+      if (trace) console.log(`\n  [TRACE] === Backfilling ${sessionsNeedingBackfill.length} sessions ===`);
+      for (const session of sessionsNeedingBackfill) {
+        const memory = loadProjectMemory(session.project);
+        if (!memory) continue; // shouldn't happen, but be safe
+        const state = getSessionProcessingState(memory, session.sessionId);
+        if (state && !state.fileSize) {
+          state.fileSize = session.fileSize;
+          saveProjectMemory(memory);
+          if (trace) console.log(`  [TRACE] backfilled ${session.sessionId.slice(0,8)} fileSize=${session.fileSize}`);
+        }
+      }
+      console.log(`📋 Backfilled fileSize for ${sessionsNeedingBackfill.length} previously processed sessions`);
+    }
+
+    // Sort actual work oldest-first for temporal evolution, then apply limit
     const sessionsOldestFirst = [...sessionsNeedingWork].sort((a, b) =>
       a.modifiedTime.getTime() - b.modifiedTime.getTime()
     );
@@ -258,8 +308,15 @@ program
       let totalMessageCount: number;
       let isIncremental = false;
 
+      if (trace) {
+        console.log(`\n  [TRACE] === Processing ${session.sessionId.slice(0, 8)} ===`);
+        console.log(`  [TRACE] prevState: ${prevState ? `messageCount=${prevState.messageCount}, fileSize=${prevState.fileSize ?? 'undefined'}` : 'null'}`);
+        console.log(`  [TRACE] session: fileSize=${session.fileSize}`);
+      }
+
       if (prevState?.fileSize && prevState.fileSize < session.fileSize) {
         // FAST PATH: Only read new bytes from the file
+        if (trace) console.log(`  [TRACE] -> FAST PATH: byte-offset read from ${prevState.fileSize}`);
         const newMessages = parseSessionFileFromOffset(
           session.path,
           prevState.fileSize,
@@ -272,20 +329,30 @@ program
         console.log(`📖 Updating ${session.sessionId.slice(0, 8)}... (+${newMessages.length} new messages, read ${session.fileSize - prevState.fileSize} bytes)`);
       } else {
         // FULL PARSE: New session or no stored fileSize
+        if (trace) console.log(`  [TRACE] -> FULL PARSE: ${prevState?.fileSize ? 'fileSize unchanged or smaller' : 'no stored fileSize'}`);
         const conversation = parseSessionFile(session.path);
         totalMessageCount = conversation.messages.length;
+        if (trace) console.log(`  [TRACE] parsed ${totalMessageCount} messages from file`);
 
         if (prevState && prevState.messageCount < conversation.messages.length) {
           // Had previous state but no fileSize - slice from message count
+          if (trace) console.log(`  [TRACE] -> INCREMENTAL: prevState.messageCount(${prevState.messageCount}) < parsed(${totalMessageCount})`);
           messagesToProcess = conversation.messages.slice(prevState.messageCount);
           isIncremental = true;
           console.log(`📖 Updating ${session.sessionId.slice(0, 8)}... (+${messagesToProcess.length} new messages)`);
         } else if (prevState && prevState.messageCount >= conversation.messages.length) {
-          // No new messages
+          // No new messages - but backfill fileSize for fast check optimization
+          if (trace) console.log(`  [TRACE] -> SKIP: prevState.messageCount(${prevState.messageCount}) >= parsed(${totalMessageCount})`);
+          if (!prevState.fileSize) {
+            if (trace) console.log(`  [TRACE] -> backfilling fileSize=${session.fileSize}`);
+            prevState.fileSize = session.fileSize;
+            saveProjectMemory(memory);
+          }
           console.log(`📖 Processing ${session.sessionId.slice(0, 8)}... (no new messages, skipping)`);
           continue;
         } else {
           // New session
+          if (trace) console.log(`  [TRACE] -> NEW SESSION: no prevState`);
           messagesToProcess = conversation.messages;
           console.log(`📖 Processing ${session.sessionId.slice(0, 8)}... (${projectName.slice(-30)})`);
         }
