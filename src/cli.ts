@@ -380,9 +380,10 @@ program
         } else if (prevState && prevState.messageCount >= conversation.messages.length) {
           // No new messages - but backfill fileSize for fast check optimization
           if (trace) console.log(`  [TRACE] -> SKIP: prevState.messageCount(${prevState.messageCount}) >= parsed(${totalMessageCount})`);
-          if (!prevState.fileSize) {
-            if (trace) console.log(`  [TRACE] -> backfilling fileSize=${session.fileSize}`);
+          if (!prevState.fileSize || !memory.rootPath) {
+            if (trace) console.log(`  [TRACE] -> backfilling fileSize=${session.fileSize}, rootPath=${process.cwd()}`);
             prevState.fileSize = session.fileSize;
+            memory.rootPath = process.cwd();
             saveProjectMemory(memory);
           }
           console.log(`📖 Processing ${session.sessionId.slice(0, 8)}... (no new messages, skipping)`);
@@ -468,7 +469,8 @@ program
         allSourceLinks,
         totalMessageCount,
         session.modifiedTime,
-        session.fileSize
+        session.fileSize,
+        process.cwd()
       );
       saveProjectMemory(memory);
 

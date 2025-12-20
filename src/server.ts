@@ -7,6 +7,8 @@
 import express from 'express';
 import { loadMemoryIndex, loadProjectMemory, searchMemory, getMemoryStats } from './memory.js';
 import { discoverSessionFiles } from './session-parser.js';
+import { join } from 'path';
+import { existsSync } from 'fs';
 import crypto from 'crypto';
 
 const app = express();
@@ -141,6 +143,7 @@ app.get('/api/projects/:id/sessions', (req, res) => {
         fullId: s.sessionId,
         timestamp: s.timestamp,
         focus: s.fragments.focus?.current_goal,
+        hasArtifact: memory.rootPath && existsSync(join(memory.rootPath, '.claude', 'prose', `session-${s.sessionId.slice(0, 8)}.md`)),
         stats: {
           decisions: decisions.length,
           insights: insights.length,
@@ -183,6 +186,24 @@ app.get('/api/projects/:id/sessions', (req, res) => {
     });
 
   res.json(sessions);
+});
+
+// Serve session artifacts
+app.get('/api/projects/:id/artifacts/:filename', (req, res) => {
+  const projectId = req.params.id;
+  const filename = req.params.filename;
+  const memory = loadProjectMemory(projectId);
+
+  if (!memory || !memory.rootPath) {
+    return res.status(404).json({ error: 'Project or root path not found' });
+  }
+
+  const artifactPath = join(memory.rootPath, '.claude', 'prose', filename);
+  if (!existsSync(artifactPath)) {
+    return res.status(404).json({ error: 'Artifact not found' });
+  }
+
+  res.sendFile(artifactPath);
 });
 
 // ============================================================================
@@ -817,6 +838,14 @@ const dashboardHtml = `
                       <div style="color: var(--text-muted);">— \${q.speaker}</div>
                     </div>
                   \`).join('')}
+                </div>
+              \` : ''}
+
+              \${session.hasArtifact ? \`
+                <div class="session-section" style="margin-top: 1.5rem; text-align: right;">
+                  <a href="/api/projects/\${encodeURIComponent(currentProject)}/artifacts/session-\${session.id}.md" target="_blank" style="color: var(--accent); font-size: 0.8rem; text-decoration: none; border: 1px solid var(--accent); padding: 0.25rem 0.5rem; border-radius: 4px;">
+                    📄 View Markdown Artifact
+                  </a>
                 </div>
               \` : ''}
             </div>

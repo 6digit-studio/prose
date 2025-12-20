@@ -62,6 +62,8 @@ export interface ProjectMemory {
   lastUpdated: Date;
   /** Sessions that have been processed (with state for incremental updates) */
   processedSessions: SessionProcessingState[];
+  /** Absolute path to project root */
+  rootPath?: string;
   /** Per-session fragment snapshots (for horizontal evolution) */
   sessionSnapshots: Array<{
     sessionId: string;
@@ -234,7 +236,8 @@ export function updateProjectMemory(
   sourceLinks: SourceLink[],
   messageCount: number,
   modifiedTime: Date,
-  fileSize?: number
+  fileSize?: number,
+  rootPath?: string
 ): ProjectMemory {
   // Update or add session processing state
   const existingIndex = memory.processedSessions.findIndex(s => s.sessionId === sessionId);
@@ -276,6 +279,7 @@ export function updateProjectMemory(
     processedSessions,
     sessionSnapshots,
     sourceLinks: [...memory.sourceLinks, ...sourceLinks],
+    rootPath: rootPath || memory.rootPath,
   };
 }
 
