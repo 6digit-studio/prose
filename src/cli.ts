@@ -42,7 +42,7 @@ import {
 import { evolveHorizontal } from './horizontal.js';
 import { generateWebsite } from './web.js';
 import { getGitCommits, isGitRepo, getAntigravityBrains, getAntigravityArtifacts, parseAntigravityArtifact, matchBrainToProject, getLatestGitCommitDate } from './source-parsers.js';
-import { injectMemory } from './injector.js';
+import { injectMemory, ensureTemplate } from './injector.js';
 
 const program = new Command();
 
@@ -129,6 +129,7 @@ program
 
     // Default init behavior
     console.log(`🧠 Initializing claude-prose for: ${projectName}\n`);
+    ensureTemplate(cwd);
 
     // Create .claude/commands directory
     const commandsDir = '.claude/commands';
@@ -537,6 +538,22 @@ program
 
     console.log(`   Total tokens: ${totalTokens}`);
     console.log(`   Memory stored: ${getMemoryDir()}`);
+
+    // Always attempt injection at the end for the current project
+    if (!options.dryRun) {
+      const cwd = process.cwd();
+      const cwdSanitized = cwd.replace(/\//g, '-').replace(/^-/, '');
+      const index = loadMemoryIndex();
+      const detectedProject = Object.keys(index.projects).find(p =>
+        p === cwdSanitized || p.endsWith(cwdSanitized) || cwdSanitized.endsWith(p.replace(/^-/, ''))
+      );
+      if (detectedProject) {
+        const memory = loadProjectMemory(detectedProject);
+        if (memory) {
+          injectMemory(cwd, memory);
+        }
+      }
+    }
   });
 
 // ============================================================================

@@ -12,6 +12,9 @@
 ## Active Gotchas
 {{PROSE_GOTCHAS}}
 
+## Usage Instructions
+{{PROSE_INSTRUCTIONS}}
+
 ## Tech Stack
 - Bun (Runtime & Test)
 - TypeScript
