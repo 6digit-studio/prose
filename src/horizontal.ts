@@ -33,7 +33,9 @@ export interface HorizontalEvolutionConfig {
   apiKey: string;
   baseUrl?: string;
   model?: string;
-  windowSize?: number;  // How many sessions to include (default: 5)
+  windowSize?: number;  // How many sessions to include (default: 3)
+  currentFragments?: AllFragments; // Baseline to evolve from
+  timeoutMs?: number; // Timeout in milliseconds (default: 60000)
 }
 
 export interface HorizontalEvolutionResult {
@@ -90,26 +92,24 @@ async function evolveDecisionsHorizontal(
 ) {
   const client = createLLMClient(config);
 
-  const prompt = `You are evolving a project's decision memory across multiple sessions.
-
-Below are the decisions from the last ${snapshots.length} sessions, ordered from most recent to oldest.
-Synthesize these into a CURRENT state - what decisions are still active and relevant NOW?
-
+  const baseline = config.currentFragments?.decisions;
+  const prompt = `You are evolving a project's decision memory across multiple recent sessions.
+${baseline ? `\n## CURRENT Decisions (Baseline):
+${JSON.stringify(baseline, null, 2)}
+` : ''}
+## Recent Session Fragments (In reverse chronological order):
 ${formatFragmentsForEvolution(snapshots)}
 
-Below are the decisions from the last ${snapshots.length} sessions, ordered from most recent to oldest.
-Sessions prefixed with "INTELLIGENT DESIGN SESSION" are direct human corrections and must be treated as absolute ground truth, overriding any conflicting automated summaries from regular sessions.
 Synthesize these into the CURRENT set of active project decisions.
-
-${formatFragmentsForEvolution(snapshots)}
-
-Evolve these into the current state. The schema describes what we need.`;
+Sessions prefixed with "INTELLIGENT DESIGN SESSION" are direct human corrections and must be treated as absolute ground truth, overriding any conflicting automated summaries from regular sessions.
+Evolve the baseline using these new session fragments. The schema describes what we need.`;
 
   const { object, usage } = await generateObject({
     model: client(config.model || 'google/gemini-3-flash-preview'),
     schema: DecisionSchema,
     prompt,
     temperature: 0.3,
+    abortSignal: AbortSignal.timeout(config.timeoutMs ?? 60000),
   });
 
   return { data: object, tokensUsed: usage.totalTokens };
@@ -124,19 +124,24 @@ async function evolveInsightsHorizontal(
 ) {
   const client = createLLMClient(config);
 
-  const prompt = `Below are the insights from the last ${snapshots.length} sessions, ordered from most recent to oldest.
-Sessions prefixed with "INTELLIGENT DESIGN SESSION" are direct human corrections and must be treated as absolute ground truth.
-Synthesize these into what's CURRENTLY valuable to know.
-
+  const baseline = config.currentFragments?.insights;
+  const prompt = `Synthesize project insights from recent sessions.
+${baseline ? `\n## CURRENT Insights (Baseline):
+${JSON.stringify(baseline, null, 2)}
+` : ''}
+## Recent Session Fragments:
 ${formatFragmentsForEvolution(snapshots)}
 
-Evolve these into the current state. The schema describes what we need.`;
+Synthesize these into what's CURRENTLY valuable to know.
+Sessions prefixed with "INTELLIGENT DESIGN SESSION" are direct human corrections and must be treated as absolute ground truth.
+Evolve the baseline using these new session fragments. The schema describes what we need.`;
 
   const { object, usage } = await generateObject({
     model: client(config.model || 'google/gemini-3-flash-preview'),
     schema: InsightSchema,
     prompt,
     temperature: 0.3,
+    abortSignal: AbortSignal.timeout(config.timeoutMs ?? 60000),
   });
 
   return { data: object, tokensUsed: usage.totalTokens };
@@ -151,20 +156,22 @@ async function evolveFocusHorizontal(
 ) {
   const client = createLLMClient(config);
 
+  const baseline = config.currentFragments?.focus;
   const prompt = `You are determining the CURRENT focus of a project based on recent sessions.
-
-Below is the focus from the last ${snapshots.length} sessions.
-Determine what the project is CURRENTLY focused on.
-
+${baseline ? `\n## CURRENT Focus (Baseline):
+${JSON.stringify(baseline, null, 2)}
+` : ''}
+## Recent Session Fragments:
 ${formatFragmentsForEvolution(snapshots)}
 
-The most recent session's focus is likely most relevant, but synthesize if needed.`;
+The most recent session's focus is likely most relevant, but synthesize if needed to produce the current state.`;
 
   const { object, usage } = await generateObject({
     model: client(config.model || 'google/gemini-3-flash-preview'),
     schema: FocusSchema,
     prompt,
     temperature: 0.3,
+    abortSignal: AbortSignal.timeout(config.timeoutMs ?? 60000),
   });
 
   return { data: object, tokensUsed: usage.totalTokens };
@@ -179,20 +186,22 @@ async function evolveNarrativeHorizontal(
 ) {
   const client = createLLMClient(config);
 
+  const baseline = config.currentFragments?.narrative;
   const prompt = `You are synthesizing the narrative arc across multiple development sessions.
-
-Below are the story beats from the last ${snapshots.length} sessions.
-Create a cohesive narrative that spans these sessions.
-
+${baseline ? `\n## CURRENT Narrative (Baseline):
+${JSON.stringify(baseline, null, 2)}
+` : ''}
+## Recent Session Fragments:
 ${formatFragmentsForEvolution(snapshots)}
 
-Focus on the overall arc, key moments, and memorable quotes.`;
+Focus on the overall arc, key moments, and memorable quotes. Evolve the existing narrative history with these new beats.`;
 
   const { object, usage } = await generateObject({
     model: client(config.model || 'google/gemini-3-flash-preview'),
     schema: NarrativeSchema,
     prompt,
     temperature: 0.5,
+    abortSignal: AbortSignal.timeout(config.timeoutMs ?? 60000),
   });
 
   return { data: object, tokensUsed: usage.totalTokens };
@@ -209,7 +218,7 @@ export async function evolveHorizontal(
   snapshots: SessionSnapshot[],
   config: HorizontalEvolutionConfig
 ): Promise<HorizontalEvolutionResult> {
-  const windowSize = config.windowSize || 5;
+  const windowSize = config.windowSize || 3;
 
   // Take only the most recent N sessions
   const window = snapshots

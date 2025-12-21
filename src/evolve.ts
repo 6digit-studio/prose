@@ -62,6 +62,7 @@ export interface EvolutionConfig {
   baseUrl?: string;
   model?: string;
   temperature?: number;
+  timeoutMs?: number; // Timeout in milliseconds (default: 60000)
 }
 
 // ============================================================================
@@ -134,6 +135,7 @@ Evolve the decisions based on the new messages. The schema describes what we nee
       schema: DecisionSchema,
       prompt: systemPrompt,
       temperature: config.temperature ?? 0.3,
+      abortSignal: AbortSignal.timeout(config.timeoutMs ?? 60000),
     });
 
     return {
@@ -184,6 +186,7 @@ Evolve the insights based on the new messages. The schema describes what we need
       schema: InsightSchema,
       prompt: systemPrompt,
       temperature: config.temperature ?? 0.3,
+      abortSignal: AbortSignal.timeout(config.timeoutMs ?? 60000),
     });
 
     return {
@@ -235,6 +238,7 @@ Update completely based on what the conversation shows as the current focus.`;
       schema: FocusSchema,
       prompt: systemPrompt,
       temperature: config.temperature ?? 0.3,
+      abortSignal: AbortSignal.timeout(config.timeoutMs ?? 60000),
     });
 
     return {
@@ -284,10 +288,11 @@ Think like a documentarian - what would make this session interesting to read ab
 Be selective - only capture truly notable moments and quotes.`;
 
     const { object, usage } = await generateObject({
-      model: client(config.model || 'google/gemini-2.5-flash'),
+      model: client(config.model || 'google/gemini-3-flash-preview'),
       schema: NarrativeSchema,
       prompt: systemPrompt,
       temperature: config.temperature ?? 0.5, // Slightly higher for creative narrative
+      abortSignal: AbortSignal.timeout(config.timeoutMs ?? 60000),
     });
 
     return {

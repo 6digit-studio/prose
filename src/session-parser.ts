@@ -353,43 +353,43 @@ export function parseSessionFileFromOffset(
       try {
         const parsed = JSON.parse(line) as RawLine;
 
-        if (parsed.type === 'file-history-snapshot') continue;
+        if (parsed.type !== 'file-history-snapshot') {
+          if (!sessionId && 'sessionId' in parsed) sessionId = parsed.sessionId;
+          if (!project && 'cwd' in parsed && parsed.cwd) project = parsed.cwd;
 
-        if (!sessionId && 'sessionId' in parsed) sessionId = parsed.sessionId;
-        if (!project && 'cwd' in parsed && parsed.cwd) project = parsed.cwd;
-
-        if (parsed.type === 'user') {
-          const text = extractTextContent(parsed.message.content);
-          if (text.trim()) {
-            messages.push({
-              role: 'user',
-              content: text,
-              timestamp: new Date(parsed.timestamp),
-              source: {
-                sessionId: parsed.sessionId,
-                messageUuid: parsed.uuid,
+          if (parsed.type === 'user') {
+            const text = extractTextContent(parsed.message.content);
+            if (text.trim()) {
+              messages.push({
+                role: 'user',
+                content: text,
                 timestamp: new Date(parsed.timestamp),
-                filePath,
-              },
-            });
-          }
-        } else if (parsed.type === 'assistant') {
-          const text = extractTextContent(parsed.message.content);
-          if (text.trim()) {
-            messages.push({
-              role: 'assistant',
-              content: text,
-              timestamp: new Date(parsed.timestamp),
-              source: {
-                sessionId: parsed.sessionId,
-                messageUuid: parsed.uuid,
+                source: {
+                  sessionId: parsed.sessionId,
+                  messageUuid: parsed.uuid,
+                  timestamp: new Date(parsed.timestamp),
+                  filePath,
+                },
+              });
+            }
+          } else if (parsed.type === 'assistant') {
+            const text = extractTextContent(parsed.message.content);
+            if (text.trim()) {
+              messages.push({
+                role: 'assistant',
+                content: text,
                 timestamp: new Date(parsed.timestamp),
-                filePath,
-              },
-            });
+                source: {
+                  sessionId: parsed.sessionId,
+                  messageUuid: parsed.uuid,
+                  timestamp: new Date(parsed.timestamp),
+                  filePath,
+                },
+              });
+            }
           }
         }
-        // Match found, successful line
+        // Match found (or skipped), successful line
         lastSuccessfulOffset = startOffset + (nextNewline === buffer.length ? buffer.length : nextNewline + 1);
       } catch (e) {
         // Partial line - stop here

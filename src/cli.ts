@@ -440,8 +440,8 @@ program
         writeVerbatimSessionArtifact(fullConversation);
       }
 
-      // Window size for evolution - Gemini 2.5 Flash has 1M context, so we can go big
-      const windowSize = 500;
+      // Window size for evolution - Gemini Flash has a huge context, we can process 2000 messages at once
+      const windowSize = 2000;
 
       const windows = [];
       for (let i = 0; i < messagesToProcess.length; i += windowSize) {
@@ -533,7 +533,11 @@ program
 
         const result = await evolveHorizontal(
           memory.sessionSnapshots,
-          { apiKey, windowSize: 5 }
+          {
+            apiKey,
+            windowSize: 3,
+            currentFragments: memory.current
+          }
         );
 
         const updated = updateCurrentFragments(memory, result.current);
