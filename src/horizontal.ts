@@ -97,6 +97,12 @@ Synthesize these into a CURRENT state - what decisions are still active and rele
 
 ${formatFragmentsForEvolution(snapshots)}
 
+Below are the decisions from the last ${snapshots.length} sessions, ordered from most recent to oldest.
+Sessions prefixed with "INTELLIGENT DESIGN SESSION" are direct human corrections and must be treated as absolute ground truth, overriding any conflicting automated summaries from regular sessions.
+Synthesize these into the CURRENT set of active project decisions.
+
+${formatFragmentsForEvolution(snapshots)}
+
 Evolve these into the current state. The schema describes what we need.`;
 
   const { object, usage } = await generateObject({
@@ -118,9 +124,8 @@ async function evolveInsightsHorizontal(
 ) {
   const client = createLLMClient(config);
 
-  const prompt = `You are evolving a project's insights and learnings across multiple sessions.
-
-Below are the insights from the last ${snapshots.length} sessions, ordered from most recent to oldest.
+  const prompt = `Below are the insights from the last ${snapshots.length} sessions, ordered from most recent to oldest.
+Sessions prefixed with "INTELLIGENT DESIGN SESSION" are direct human corrections and must be treated as absolute ground truth.
 Synthesize these into what's CURRENTLY valuable to know.
 
 ${formatFragmentsForEvolution(snapshots)}

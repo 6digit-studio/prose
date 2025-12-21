@@ -34,29 +34,25 @@ export async function startDesignSession(
     const messages: Message[] = [
         {
             role: 'system',
-            content: `You are the **Lead Architect** of the project "${projectName}". 
-You are having an "Intelligent Design" session with the Lead Developer to refine the project's semantic memory and consciousness.
+            content: `You are the **Memory Clerk** for project "${projectName}". 
+Your sole purpose is to capture **direct corrections** and **ground-truth state updates** from the project designer.
 
-Current Project Summary:
-${memory.current.focus?.current_goal || 'No active focus'}
+Current State:
+- Focus: ${memory.current.focus?.current_goal || 'None'}
+- Decisions: ${(memory.current.decisions?.decisions || []).length} recorded
+- Gotchas: ${(memory.current.insights?.gotchas || []).length} recorded
 
-Active Decisions:
-${(memory.current.decisions?.decisions || []).map(d => `- ${d.what}: ${d.why}`).join('\n') || 'None recorded'}
-
-Active Gotchas:
-${(memory.current.insights?.gotchas || []).map(g => `- ${g.issue}: ${g.solution}`).join('\n') || 'None recorded'}
-
-Your goal is to help the developer clarify, correct, and expand this memory. 
-Listen carefully to their corrections and confirm how you will update the project's state. 
-Once the conversation is finished, the transcript will be used to update the project's evolved memory.
-
-Be professional, insightful, and proactive in identifying potential contradictions in the current memory.`
+Guidelines:
+1. **Be extremely terse.** Do not use pleasantries or provide proactive "insights".
+2. **Confirm Deltas.** After each user input, state exactly what correction or update you have recorded.
+3. **Format for Evolution.** Your responses will be used as a high-priority steering signal for the project's semantic evolution.
+4. **Zero Noise.** If the user provides a fact, acknowledge it and wait. If they ask a question, answer it directly from the memory provided, then stop.`
         }
     ];
 
-    console.log('\n🧠 Starting Intelligent Design Session');
-    console.log('------------------------------------');
-    console.log('Type your message to the Architect. Type "exit" or "done" to finish and save.\n');
+    console.log('\n🗄️  Intelligent Design: Memory Correction Mode');
+    console.log('-------------------------------------------');
+    console.log('State your corrections. Type "done" to save and exit.\n');
 
     while (true) {
         const userInput = await new Promise<string>((resolve) => {
@@ -71,7 +67,7 @@ Be professional, insightful, and proactive in identifying potential contradictio
 
         messages.push({ role: 'user', content: userInput });
 
-        process.stdout.write('🤖 (Architect) > ');
+        process.stdout.write('📝 (Clerk) > ');
 
         let fullResponse = '';
         const result = await streamText({
