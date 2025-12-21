@@ -18,7 +18,7 @@ config({ quiet: true });  // Load from current directory
 config({ path: join(homedir(), '.config', 'claude-prose', '.env'), quiet: true });  // Global config
 
 import { Command } from 'commander';
-import { discoverSessionFiles, parseSessionFile, parseSessionFileFromOffset, getSessionStats, getClaudeProjectsDir } from './session-parser.js';
+import { discoverSessionFiles, parseSessionFile, parseSessionFileFromOffset, getSessionStats, getClaudeProjectsDir, type Message, type SessionFile } from './session-parser.js';
 import { evolveAllFragments } from './evolve.js';
 import { emptyFragments } from './schemas.js';
 import {
@@ -189,7 +189,7 @@ program
   .command('evolve')
   .description('Process Claude Code sessions and evolve semantic fragments')
   .option('-p, --project <path>', 'Filter to specific project path')
-  .option('-l, --limit <n>', 'Limit number of sessions to process', '10')
+  .option('-l, --limit <n>', 'Limit number of sessions to process', '50')
   .option('-f, --force', 'Reprocess already-processed sessions')
   .option('--dry-run', 'Show what would be processed without making changes')
   .option('-v, --verbose', 'Show detailed progress')
@@ -238,7 +238,7 @@ program
     }
 
     // Discover sessions
-    const sessions = discoverSessionFiles(projectFilter);
+    const sessions = discoverSessionFiles(projectFilter, process.cwd());
 
     // Add Git if requested
     if (options.git) {
@@ -340,8 +340,9 @@ program
       const prevState = getSessionProcessingState(memory, session.sessionId);
 
       // Use offset-based parsing if we have a stored fileSize (append-only optimization)
-      let messagesToProcess: ReturnType<typeof parseSessionFile>['messages'];
+      let messagesToProcess: Message[] = [];
       let totalMessageCount: number;
+      let lastProcessedBytes: number = prevState?.fileSize || 0;
       let isIncremental = false;
 
       if (trace) {
@@ -368,22 +369,24 @@ program
       } else if (prevState?.fileSize && prevState.fileSize < session.fileSize) {
         // FAST PATH: Only read new bytes from the file
         if (trace) console.log(`  [TRACE] -> FAST PATH: byte-offset read from ${prevState.fileSize}`);
-        const newMessages = parseSessionFileFromOffset(
+        const result = parseSessionFileFromOffset(
           session.path,
           prevState.fileSize,
           session.sessionId,
           projectName
         );
-        messagesToProcess = newMessages;
-        totalMessageCount = prevState.messageCount + newMessages.length;
+        messagesToProcess = result.messages;
+        totalMessageCount = prevState.messageCount + result.messages.length;
+        lastProcessedBytes = result.processedBytes;
         isIncremental = true;
-        console.log(`📖 Updating ${session.sessionId.slice(0, 8)}... (+${newMessages.length} new messages, read ${session.fileSize - prevState.fileSize} bytes)`);
+        console.log(`📖 Updating ${session.sessionId.slice(0, 8)}... (+${result.messages.length} new messages, read ${result.processedBytes - prevState.fileSize} bytes)`);
       } else {
         // FULL PARSE: New session or no stored fileSize
         if (trace) console.log(`  [TRACE] -> FULL PARSE: ${prevState?.fileSize ? 'fileSize unchanged or smaller' : 'no stored fileSize'}`);
         const conversation = parseSessionFile(session.path);
         totalMessageCount = conversation.messages.length;
-        if (trace) console.log(`  [TRACE] parsed ${totalMessageCount} messages from file`);
+        lastProcessedBytes = conversation.processedBytes;
+        if (trace) console.log(`  [TRACE] parsed ${totalMessageCount} messages from file, processedBytes=${lastProcessedBytes}`);
 
         if (prevState && prevState.messageCount < conversation.messages.length) {
           // Had previous state but no fileSize - slice from message count
@@ -420,7 +423,7 @@ program
           [],
           totalMessageCount,
           session.modifiedTime,
-          session.fileSize
+          lastProcessedBytes
         );
         saveProjectMemory(memory);
         continue;
@@ -431,7 +434,7 @@ program
         continue;
       }
 
-      // Verbatim Mirroring (Digital Archaeology)
+      // Update artifacts if requested
       if (options.artifacts && !['git', 'antigravity', 'design'].includes(session.sourceType as string)) {
         const fullConversation = parseSessionFile(session.path);
         writeVerbatimSessionArtifact(fullConversation);
@@ -489,7 +492,7 @@ program
         allSourceLinks,
         totalMessageCount,
         session.modifiedTime,
-        session.fileSize,
+        lastProcessedBytes,
         process.cwd()
       );
       saveProjectMemory(memory);

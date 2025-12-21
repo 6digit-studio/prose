@@ -1,29 +1,28 @@
 # Claude Prose - Development Guide
 
 ## Project Awareness
-Implement an 'Ambient Context' system to automatically update CLAUDE.md using templates and project memory.
+Building a robust session management and evolution system (claude-prose) featuring a web-based viewer, temporal search, and CWD-aware CLI tools.
 
 ## Critical Decisions
-- **Implement an 'Ambient Context' system using template-based CLAUDE.md injection.**: To provide Claude with project memory without intrusive shims, ensuring the LLM always has access to the latest decisions and insights via the standard CLAUDE.md file.
-- **Use a 'CLAUDE.md.template' file with specific handlebars-style placeholders.**: Allows users to maintain their own custom CLAUDE.md structure (instructions, build commands) while letting the tool manage the dynamic memory sections.
-- **Trigger the injection logic as the final step of the 'evolve' command.**: Ensures that as soon as the project memory is updated from a conversation, the project's primary context file is immediately synchronized.
-- **Horizontal evolution using a fixed rolling window for session snapshot compression.**: To prioritize predictability and simplicity over complex pruning algorithms when managing the window of project information.
-- **CWD-aware CLI architecture (status, evolve, search).**: To follow a 'zero-config' philosophy where the tool automatically detects the project context based on the user's current directory.
-- **Fast incremental processing using stat() checks and byte-offset reading.**: To significantly speed up 'needs processing' checks and reduce token usage by avoiding full file parsing and only processing new messages.
-- **Renamed /memory command to /flash.**: To avoid conflicts with built-in commands in the Claude Code environment.
+- **Horizontal Evolution with a fixed rolling window constraint.**: To improve session snapshot compression and predictability while avoiding complex algorithmic pruning.
+- **Zero-config CWD-awareness for CLI commands (search, evolve, status).**: To improve developer ergonomics by automatically detecting the active project based on the current directory.
+- **Fast incremental evolution using stat() checks and byte-offset reading.**: To minimize token usage and processing time by only analyzing new messages in a session.
+- **Interactive web dashboard via `claude-prose serve`.**: To provide a browsable interface for project fragments (Decisions, Insights, Gotchas) and historical session data.
+- **Renamed /memory command to /flash.**: To prevent namespace collisions with built-in Claude Code commands.
+- **Global configuration via ~/.config/claude-prose/.env.**: To securely manage API keys and settings outside of the project codebase.
+- **Opt-in background evolution via `init hooks`.**: To allow automatic memory updates during the `/compact` cycle without forcing it on all developers.
 
 ## Project Insights
-- An 'Ambient Context' system using a template-based injection (CLAUDE.md.template) allows for automated, non-intrusive updates to project documentation during the evolution workflow.
-- The 'evolve' command is the ideal lifecycle hook for updating documentation, as it represents the moment new insights and decisions are finalized.
-- Fast incremental evolution is achieved via stat() checks and byte-offset reading, ensuring that only new messages are processed, which significantly reduces token usage.
-- CWD-awareness across commands (status, evolve, search) creates a 'zero-config' experience by automatically detecting the relevant project context based on the user's directory.
-- 'Horizontal Evolution' uses a rolling window to compress session snapshots into a current state, prioritizing predictability and recency-based relevance over complex pruning algorithms.
+- Using `stat()` checks and byte-offset reading allows for 'zero-parsing' checks, significantly speeding up the detection of sessions that actually need processing.
+- A 'zero-config' philosophy driven by CWD-awareness (Current Working Directory) reduces user friction by auto-detecting the active project for status, search, and evolution.
+- 'Horizontal Evolution' (compressing the last N snapshots) combined with temporal search (recency-weighted relevance) provides a more predictable and useful context than complex algorithmic pruning.
+- Using Gemini Flash for semantic extraction keeps costs low (~$0.07/session), making frequent background evolution viable.
+- Providing an `init hooks` command allows developers to opt-in to auto-evolution during `/compact` via gitignored hooks, ensuring memory stays fresh without manual intervention.
 
 ## Active Gotchas
-- **Placeholders with no data might leave ugly empty sections in CLAUDE.md.**: Handle empty memory states by replacing placeholders with a graceful "None yet" or similar placeholder text.
-- **Incorrect project matching due to includes() check, leading to expensive processing of unrelated projects.**: Changed project filter to use exact match or strict -projectname suffix match.
-- **Token usage growth and non-truly incremental evolution due to processing whole sessions instead of only new messages.**: Implemented incremental updates to process only NEW messages, using a rolling window of old fragments and new messages, and skipping empty sessions.
-- **Conflict with a built-in command when using '/memory'.**: Renamed '/memory' command to '/flash'.
+- **Incorrect project matching using `includes()` caused expensive processing of unrelated projects.**: Use exact matches or strict `-projectname` suffix matching for project filtering.
+- **Token usage bloat and non-incremental evolution when processing entire session files.**: Implemented fast incremental updates using `stat()` checks and byte-offset reading to process only new messages.
+- **Command name collision with built-in environment commands (specifically `/memory`).**: Renamed the command to `/flash`.
 
 ## Usage Instructions
 ### 🧠 Semantic Memory & Search
@@ -54,4 +53,4 @@ This project uses `claude-prose` to maintain a cross-session semantic memory of 
 
 > [!NOTE]
 > This file is automatically generated from `CLAUDE.md.template` by `claude-prose`.
-> Last updated: 12/20/2025, 11:35:40 AM
+> Last updated: 12/21/2025, 7:16:08 PM

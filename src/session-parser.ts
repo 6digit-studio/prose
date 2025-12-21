@@ -33,6 +33,7 @@ export interface Conversation {
   messages: Message[];
   startTime: Date;
   endTime: Date;
+  processedBytes: number;
 }
 
 export type SourceType = 'claude-code' | 'git' | 'antigravity';
@@ -93,9 +94,11 @@ export function getClaudeProjectsDir(): string {
 }
 
 /**
- * Discover all session files for a given project
+ * Discover all session files for a given project.
+ * If currentCwd is provided, it will also scan for recent sessions in other project directories
+ * where the internal CWD matches (to catch sessions misappropriated by Claude Code).
  */
-export function discoverSessionFiles(projectPath?: string): SessionFile[] {
+export function discoverSessionFiles(projectPath?: string, currentCwd?: string): SessionFile[] {
   const projectsDir = getClaudeProjectsDir();
 
   if (!existsSync(projectsDir)) {
@@ -126,7 +129,7 @@ export function discoverSessionFiles(projectPath?: string): SessionFile[] {
     }
 
     const files = readdirSync(projectDirPath, { withFileTypes: true })
-      .filter(f => f.isFile() && f.name.endsWith('.jsonl') && !f.name.startsWith('agent-'));
+      .filter(f => f.isFile() && f.name.endsWith('.jsonl'));
 
     for (const file of files) {
       const filePath = join(projectDirPath, file.name);
@@ -140,6 +143,61 @@ export function discoverSessionFiles(projectPath?: string): SessionFile[] {
         fileSize: stats.size,
         sourceType: 'claude-code',
       });
+    }
+
+    // Optimization: If we found no matches in this directory, but it's NOT the primary projectFilter's directory,
+    // we could skip scanning if currentCwd is provided. But for now, we scan all dirs if currentCwd is provided.
+  }
+
+  // CWD-based secondary discovery (Digital Archaeology of misfiled sessions)
+  if (currentCwd) {
+    const twelveHoursAgo = Date.now() - 12 * 60 * 60 * 1000;
+
+    for (const projectDir of projectDirs) {
+      const projectDirPath = join(projectsDir, projectDir.name);
+
+      // If we already searched this as the primary projectPath, skip it here
+      if (projectPath) {
+        const normalizedProjectPath = projectPath.replace(/\//g, '-').replace(/^-/, '');
+        if (projectDir.name.replace(/^-/, '') === normalizedProjectPath) continue;
+      }
+
+      const files = readdirSync(projectDirPath, { withFileTypes: true })
+        .filter(f => f.isFile() && f.name.endsWith('.jsonl'));
+
+      for (const file of files) {
+        const filePath = join(projectDirPath, file.name);
+        const stats = statSync(filePath);
+
+        // Only scan RECENT files in other directories (to keep it fast)
+        if (stats.mtime.getTime() < twelveHoursAgo) continue;
+
+        // Skip if we already found this session via primary scan (shouldn't happen with above skip but safe)
+        if (sessionFiles.some(sf => sf.path === filePath)) continue;
+
+        try {
+          // Peek at the first few lines to find 'cwd'
+          const fd = openSync(filePath, 'r');
+          const buffer = Buffer.alloc(4096); // Read first 4KB
+          readSync(fd, buffer, 0, buffer.length, 0);
+          closeSync(fd);
+
+          const content = buffer.toString('utf-8');
+          const firstLine = content.split('\n')[0];
+          if (firstLine && firstLine.includes(currentCwd)) {
+            sessionFiles.push({
+              path: filePath,
+              sessionId: file.name.replace('.jsonl', ''),
+              project: projectDir.name,
+              modifiedTime: stats.mtime,
+              fileSize: stats.size,
+              sourceType: 'claude-code',
+            });
+          }
+        } catch (e) {
+          // Error reading/peeking, skip
+        }
+      }
     }
   }
 
@@ -178,64 +236,67 @@ function extractTextContent(content: string | Array<{ type: string; text?: strin
  */
 export function parseSessionFile(filePath: string): Conversation {
   const content = readFileSync(filePath, 'utf-8');
-  const lines = content.trim().split('\n').filter(line => line.trim());
+  const buffer = Buffer.from(content, 'utf-8');
 
+  // We need to track exact byte offsets for append-only partial line safety.
+  // Instead of simple split('\n'), we'll find newlines and track offsets.
   const messages: Message[] = [];
   let sessionId = '';
   let project = '';
+  let lastSuccessfulOffset = 0;
+  let currentOffset = 0;
 
-  for (const line of lines) {
-    try {
-      const parsed = JSON.parse(line) as RawLine;
+  while (currentOffset < buffer.length) {
+    let nextNewline = buffer.indexOf(10, currentOffset); // 10 is '\n'
+    if (nextNewline === -1) nextNewline = buffer.length;
 
-      // Skip file history snapshots
-      if (parsed.type === 'file-history-snapshot') {
-        continue;
-      }
+    const lineBuffer = buffer.subarray(currentOffset, nextNewline);
+    const line = lineBuffer.toString('utf-8').trim();
 
-      // Extract session metadata from first valid message
-      if (!sessionId && 'sessionId' in parsed) {
-        sessionId = parsed.sessionId;
-      }
-      if (!project && 'cwd' in parsed && parsed.cwd) {
-        project = parsed.cwd;
-      }
+    if (line) {
+      try {
+        const parsed = JSON.parse(line) as RawLine;
 
-      if (parsed.type === 'user') {
-        const text = extractTextContent(parsed.message.content);
-        if (text.trim()) {  // Only include if there's actual text content
-          messages.push({
-            role: 'user',
-            content: text,
-            timestamp: new Date(parsed.timestamp),
-            source: {
-              sessionId: parsed.sessionId,
-              messageUuid: parsed.uuid,
-              timestamp: new Date(parsed.timestamp),
-              filePath,
-            },
-          });
+        // If we got here, it's valid JSON.
+        // Process the line as before...
+        if (parsed.type !== 'file-history-snapshot') {
+          if (!sessionId && 'sessionId' in parsed) sessionId = parsed.sessionId;
+          if (!project && 'cwd' in parsed && parsed.cwd) project = parsed.cwd;
+
+          if (parsed.type === 'user') {
+            const text = extractTextContent(parsed.message.content);
+            if (text.trim()) {
+              messages.push({
+                role: 'user',
+                content: text,
+                timestamp: new Date(parsed.timestamp),
+                source: { sessionId: parsed.sessionId, messageUuid: parsed.uuid, timestamp: new Date(parsed.timestamp), filePath },
+              });
+            }
+          } else if (parsed.type === 'assistant') {
+            const text = extractTextContent(parsed.message.content);
+            if (text.trim()) {
+              messages.push({
+                role: 'assistant',
+                content: text,
+                timestamp: new Date(parsed.timestamp),
+                source: { sessionId: parsed.sessionId, messageUuid: parsed.uuid, timestamp: new Date(parsed.timestamp), filePath },
+              });
+            }
+          }
         }
-      } else if (parsed.type === 'assistant') {
-        const text = extractTextContent(parsed.message.content);
-        if (text.trim()) {  // Only include if there's actual text content
-          messages.push({
-            role: 'assistant',
-            content: text,
-            timestamp: new Date(parsed.timestamp),
-            source: {
-              sessionId: parsed.sessionId,
-              messageUuid: parsed.uuid,
-              timestamp: new Date(parsed.timestamp),
-              filePath,
-            },
-          });
-        }
+
+        // Mark this line as successfully processed
+        lastSuccessfulOffset = nextNewline === buffer.length ? buffer.length : nextNewline + 1;
+      } catch (e) {
+        // Malformed line - likely partial. Stop parsing here to prevent skipping it permanently.
+        break;
       }
-    } catch (e) {
-      // Skip malformed lines
-      continue;
+    } else {
+      // Empty line - just skip and move past the newline
+      lastSuccessfulOffset = nextNewline === buffer.length ? buffer.length : nextNewline + 1;
     }
+    currentOffset = nextNewline + 1;
   }
 
   // Sort by timestamp
@@ -247,6 +308,7 @@ export function parseSessionFile(filePath: string): Conversation {
     messages,
     startTime: messages[0]?.timestamp || new Date(),
     endTime: messages[messages.length - 1]?.timestamp || new Date(),
+    processedBytes: lastSuccessfulOffset,
   };
 }
 
@@ -259,10 +321,10 @@ export function parseSessionFileFromOffset(
   startOffset: number,
   existingSessionId?: string,
   existingProject?: string
-): Message[] {
+): { messages: Message[]; processedBytes: number } {
   const stats = statSync(filePath);
   if (startOffset >= stats.size) {
-    return []; // No new content
+    return { messages: [], processedBytes: startOffset }; // No new content
   }
 
   // Read only new bytes
@@ -272,62 +334,76 @@ export function parseSessionFileFromOffset(
   closeSync(fd);
 
   const content = buffer.toString('utf-8');
-  const lines = content.split('\n').filter(line => line.trim());
 
-  // First line might be partial if we seeked mid-line, so try to parse and skip if invalid
+  // Similar to parseSessionFile, we track successful offsets
   const messages: Message[] = [];
   let sessionId = existingSessionId || '';
   let project = existingProject || '';
+  let lastSuccessfulOffset = startOffset;
+  let currentOffset = 0;
 
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-    try {
-      const parsed = JSON.parse(line) as RawLine;
+  while (currentOffset < buffer.length) {
+    let nextNewline = buffer.indexOf(10, currentOffset);
+    if (nextNewline === -1) nextNewline = buffer.length;
 
-      if (parsed.type === 'file-history-snapshot') continue;
+    const lineBuffer = buffer.subarray(currentOffset, nextNewline);
+    const line = lineBuffer.toString('utf-8').trim();
 
-      if (!sessionId && 'sessionId' in parsed) sessionId = parsed.sessionId;
-      if (!project && 'cwd' in parsed && parsed.cwd) project = parsed.cwd;
+    if (line) {
+      try {
+        const parsed = JSON.parse(line) as RawLine;
 
-      if (parsed.type === 'user') {
-        const text = extractTextContent(parsed.message.content);
-        if (text.trim()) {
-          messages.push({
-            role: 'user',
-            content: text,
-            timestamp: new Date(parsed.timestamp),
-            source: {
-              sessionId: parsed.sessionId,
-              messageUuid: parsed.uuid,
+        if (parsed.type === 'file-history-snapshot') continue;
+
+        if (!sessionId && 'sessionId' in parsed) sessionId = parsed.sessionId;
+        if (!project && 'cwd' in parsed && parsed.cwd) project = parsed.cwd;
+
+        if (parsed.type === 'user') {
+          const text = extractTextContent(parsed.message.content);
+          if (text.trim()) {
+            messages.push({
+              role: 'user',
+              content: text,
               timestamp: new Date(parsed.timestamp),
-              filePath,
-            },
-          });
-        }
-      } else if (parsed.type === 'assistant') {
-        const text = extractTextContent(parsed.message.content);
-        if (text.trim()) {
-          messages.push({
-            role: 'assistant',
-            content: text,
-            timestamp: new Date(parsed.timestamp),
-            source: {
-              sessionId: parsed.sessionId,
-              messageUuid: parsed.uuid,
+              source: {
+                sessionId: parsed.sessionId,
+                messageUuid: parsed.uuid,
+                timestamp: new Date(parsed.timestamp),
+                filePath,
+              },
+            });
+          }
+        } else if (parsed.type === 'assistant') {
+          const text = extractTextContent(parsed.message.content);
+          if (text.trim()) {
+            messages.push({
+              role: 'assistant',
+              content: text,
               timestamp: new Date(parsed.timestamp),
-              filePath,
-            },
-          });
+              source: {
+                sessionId: parsed.sessionId,
+                messageUuid: parsed.uuid,
+                timestamp: new Date(parsed.timestamp),
+                filePath,
+              },
+            });
+          }
         }
+        // Match found, successful line
+        lastSuccessfulOffset = startOffset + (nextNewline === buffer.length ? buffer.length : nextNewline + 1);
+      } catch (e) {
+        // Partial line - stop here
+        break;
       }
-    } catch (e) {
-      // Skip malformed lines (including partial first line from seeking)
-      continue;
+    } else {
+      // Empty line
+      lastSuccessfulOffset = startOffset + (nextNewline === buffer.length ? buffer.length : nextNewline + 1);
     }
+    currentOffset = nextNewline + 1;
   }
 
   messages.sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
-  return messages;
+  return { messages, processedBytes: lastSuccessfulOffset };
 }
 
 /**

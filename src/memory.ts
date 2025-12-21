@@ -240,7 +240,7 @@ export function updateProjectMemory(
   rootPath?: string
 ): ProjectMemory {
   // Update or add session processing state
-  const existingIndex = memory.processedSessions.findIndex(s => s.sessionId === sessionId);
+  const existingIndex = memory.processedSessions.findIndex(s => typeof s === 'object' && s !== null && 'sessionId' in s && (s as any).sessionId === sessionId);
   const newState: SessionProcessingState = {
     sessionId,
     messageCount,
@@ -305,7 +305,7 @@ export function getSessionProcessingState(
   sessionId: string
 ): SessionProcessingState | null {
   if (!memory) return null;
-  return memory.processedSessions.find(s => s.sessionId === sessionId) || null;
+  return (memory.processedSessions.find(s => typeof s === 'object' && s !== null && 'sessionId' in s && (s as any).sessionId === sessionId) as SessionProcessingState) || null;
 }
 
 /**
