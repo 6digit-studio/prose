@@ -37,7 +37,7 @@ import {
   getMemoryDir,
   generateContextMarkdown,
   writeContextFile,
-  exportSessionArtifacts,
+  writeVerbatimSessionArtifact,
 } from './memory.js';
 import { evolveHorizontal } from './horizontal.js';
 import { generateWebsite } from './web.js';
@@ -431,6 +431,12 @@ program
         continue;
       }
 
+      // Verbatim Mirroring (Digital Archaeology)
+      if (options.artifacts && !['git', 'antigravity', 'design'].includes(session.sourceType as string)) {
+        const fullConversation = parseSessionFile(session.path);
+        writeVerbatimSessionArtifact(fullConversation);
+      }
+
       // Window size for evolution - Gemini 2.5 Flash has 1M context, so we can go big
       const windowSize = 500;
 
@@ -496,10 +502,6 @@ program
       processed++;
       console.log(`   ✅ Evolved (${windows.length} windows, ${totalTokens} tokens total)`);
 
-      if (options.artifacts && !options.dryRun) {
-        const artifactsDir = join(process.cwd(), '.claude', 'prose');
-        exportSessionArtifacts(projectName, artifactsDir);
-      }
     }
 
     // Save index
@@ -1027,10 +1029,16 @@ program
       }
     }
 
-    console.log(`📦 Exporting artifacts for ${projectName}...`);
+    console.log(`📦 Exporting verbatim artifacts for ${projectName}...`);
     const artifactsDir = join(process.cwd(), '.claude', 'prose');
-    const count = exportSessionArtifacts(projectName, artifactsDir);
-    console.log(`✅ Exported ${count} artifacts to ${artifactsDir}`);
+    const sessions = discoverSessionFiles(projectName);
+    let count = 0;
+    for (const session of sessions) {
+      const conv = parseSessionFile(session.path);
+      writeVerbatimSessionArtifact(conv, artifactsDir);
+      count++;
+    }
+    console.log(`✅ Exported ${count} verbatim artifacts to ${artifactsDir}`);
   });
 
 program.parse();
