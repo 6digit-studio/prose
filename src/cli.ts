@@ -531,11 +531,27 @@ program
         const memory = loadProjectMemory(projectName);
         if (!memory || !memory.sessionSnapshots?.length) continue;
 
+        // "Old data is the OPPOSITE of evolution"
+        // Feed only what we JUST processed into the horizontal evolution step.
+        const currentProject = projectName;
+        const newSessionIds = new Set(sessionsToProcess
+          .filter(s => s.project === currentProject)
+          .map(s => s.sessionId));
+
+        const newSnapshots = memory.sessionSnapshots.filter(s => newSessionIds.has(s.sessionId));
+
+        if (newSnapshots.length === 0) {
+          if (options.verbose) {
+            console.log(`   ⏭️ Skipping horizontal evolution for ${projectName}: No new snapshots found`);
+          }
+          continue;
+        }
+
         const result = await evolveHorizontal(
-          memory.sessionSnapshots,
+          newSnapshots,
           {
             apiKey,
-            windowSize: 3,
+            windowSize: newSnapshots.length,
             currentFragments: memory.current
           }
         );
