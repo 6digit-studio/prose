@@ -594,6 +594,121 @@ program
   });
 
 // ============================================================================
+// merge - Integrate memory from another project
+// ============================================================================
+
+program
+  .command('merge')
+  .description('Integrate memory fragments from another project')
+  .requiredOption('--from <project>', 'Source project to import from')
+  .option('--to <project>', 'Target project (defaults to current)')
+  .option('--dry-run', 'Show what would be merged without making changes')
+  .action(async (options) => {
+    const apiKey = process.env.LLM_API_KEY || process.env.OPENROUTER_API_KEY || process.env.OPENAI_API_KEY;
+    if (!apiKey) {
+      console.error('❌ No API key found. Set LLM_API_KEY, OPENROUTER_API_KEY, or OPENAI_API_KEY in .env or environment');
+      process.exit(1);
+    }
+
+    const index = loadMemoryIndex();
+
+    // Resolve source project
+    const sourceQuery = options.from;
+    const sourceProject = Object.keys(index.projects).find(p =>
+      p === sourceQuery || p.endsWith(`-${sourceQuery}`) || p.includes(sourceQuery)
+    );
+
+    if (!sourceProject) {
+      console.error(`❌ Source project not found: ${sourceQuery}`);
+      process.exit(1);
+    }
+
+    // Resolve target project
+    let targetProjectQuery = options.to;
+    let targetProject;
+    if (!targetProjectQuery) {
+      const cwd = process.cwd();
+      const cwdSanitized = cwd.replace(/\//g, '-').replace(/^-/, '');
+      targetProject = Object.keys(index.projects).find(p =>
+        p === cwdSanitized || p.endsWith(cwdSanitized) || cwdSanitized.endsWith(p.replace(/^-/, ''))
+      );
+    } else {
+      targetProject = Object.keys(index.projects).find(p =>
+        p === targetProjectQuery || p.endsWith(`-${targetProjectQuery}`) || p.includes(targetProjectQuery)
+      );
+    }
+
+    if (!targetProject) {
+      console.error(`❌ Target project not found. Set --to or run from a project directory.`);
+      process.exit(1);
+    }
+
+    if (sourceProject === targetProject) {
+      console.error(`❌ Cannot merge a project into itself.`);
+      process.exit(1);
+    }
+
+    console.log(`🧬 Merging: ${sourceProject.replace(/^-Users-[^-]+-src-/, '')} → ${targetProject.replace(/^-Users-[^-]+-src-/, '')}\n`);
+
+    const sourceMemory = loadProjectMemory(sourceProject);
+    const targetMemory = loadProjectMemory(targetProject);
+
+    if (!sourceMemory) {
+      console.error(`❌ Could not load source memory for ${sourceProject}`);
+      process.exit(1);
+    }
+    if (!targetMemory) {
+      console.error(`❌ Could not load target memory for ${targetProject}`);
+      process.exit(1);
+    }
+
+    if (options.dryRun) {
+      console.log('🧪 Dry run - would merge current fragments from source into target.');
+      return;
+    }
+
+    console.log('🔄 Running integration evolution...');
+
+    // Wrap source's current fragments as a pseudo-snapshot
+    const integrationSnapshot = {
+      sessionId: `integration-${sourceProject.replace(/^-/, '')}-${Date.now()}`,
+      timestamp: new Date(),
+      fragments: sourceMemory.current
+    };
+
+    const result = await evolveHorizontal(
+      [integrationSnapshot],
+      {
+        apiKey,
+        windowSize: 1,
+        currentFragments: targetMemory.current
+      }
+    );
+
+    const updated = updateCurrentFragments(targetMemory, result.current);
+    saveProjectMemory(updated);
+
+    // Update index for target
+    index.projects[targetProject] = {
+      ...index.projects[targetProject],
+      lastUpdated: new Date()
+    };
+    saveMemoryIndex(index);
+
+    // Inject into CLAUDE.md if target matches CWD
+    const cwd = process.cwd();
+    const cwdSanitized = cwd.replace(/\//g, '-').replace(/^-/, '');
+    if (targetProject === cwdSanitized || targetProject.endsWith(`-${cwdSanitized}`)) {
+      injectMemory(cwd, updated);
+    }
+
+    console.log('\n✅ Integration complete.');
+    if (result.musings) {
+      console.log(`💭 ${result.musings}`);
+    }
+  });
+
+// ============================================================================
 // design - Interactive session to shape memory
 // ============================================================================
 

@@ -233,8 +233,9 @@ export async function evolveHorizontal(
     };
   }
 
-  // If only one session, just return its fragments
-  if (window.length === 1) {
+  // If only one session and NO baseline, just return its fragments directly (bootstrap)
+  // If we HAVE a baseline, we ALWAYS want to evolve even if it's just one session (Integration)
+  if (window.length === 1 && !config.currentFragments) {
     return {
       current: window[0].fragments,
       tokensUsed: 0,
