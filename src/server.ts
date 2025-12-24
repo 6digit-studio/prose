@@ -627,7 +627,7 @@ const dashboardHtml = `
 </head>
 <body>
   <header>
-    <div class="logo">claude-prose</div>
+    <div class="logo">prose</div>
     <div class="search-box">
       <input type="text" id="search" placeholder="Search decisions, insights, gotchas...">
     </div>

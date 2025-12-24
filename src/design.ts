@@ -3,6 +3,7 @@ import { streamText } from 'ai';
 import { existsSync, mkdirSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import * as readline from 'readline';
+import * as logger from './logger.js';
 import type { ProjectMemory } from './memory.js';
 
 interface Message {
@@ -106,6 +107,6 @@ Guidelines:
         writeFileSync(filePath, JSON.stringify(designArtifact, null, 2));
 
         console.log(`✅ Design session saved to: ${filePath}`);
-        console.log('Run `claude-prose evolve` to integrate these corrections into the project memory.');
+        logger.info('Run `prose evolve` to integrate these corrections into the project memory.');
     }
 }

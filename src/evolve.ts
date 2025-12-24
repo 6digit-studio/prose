@@ -1,7 +1,7 @@
 /**
  * Fragment Evolution Engine
  *
- * The core of claude-prose: evolve semantic fragments as new messages
+ * The core of prose: evolve semantic fragments as new messages
  * are processed. Each fragment sees its own previous state and produces
  * an updated version - evolution, not extraction.
  *

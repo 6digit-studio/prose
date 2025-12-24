@@ -5,8 +5,7 @@
   "type": "module",
   "main": "dist/index.js",
   "bin": {
-    "prose": "dist/cli.js",
-    "claude-prose": "dist/cli.js"
+    "prose": "dist/cli.js"
   },
   "scripts": {
     "build": "tsc",
