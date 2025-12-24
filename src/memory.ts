@@ -101,6 +101,14 @@ export function getIndexPath(): string {
 }
 
 /**
+ * Sanitize a file path into a project name string.
+ * Replaces both / and \ with - and removes leading dash.
+ */
+export function sanitizePath(path: string): string {
+  return path.replace(/[/\\]/g, '-').replace(/^-+/, '');
+}
+
+/**
  * Get the path to a project's memory file
  */
 export function getProjectMemoryPath(projectName: string): string {

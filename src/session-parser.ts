@@ -8,6 +8,23 @@
 import { readFileSync, readdirSync, existsSync, statSync, openSync, readSync, closeSync } from 'fs';
 import { join, basename } from 'path';
 import { homedir } from 'os';
+import {
+  loadProjectMemory,
+  saveProjectMemory,
+  createProjectMemory,
+  updateProjectMemory,
+  updateCurrentFragments,
+  sessionNeedsProcessing,
+  sessionNeedsProcessingFast,
+  getSessionProcessingState,
+  searchMemory,
+  getMemoryStats,
+  getMemoryDir,
+  generateContextMarkdown,
+  writeContextFile,
+  writeVerbatimSessionArtifact,
+  sanitizePath,
+} from './memory.js';
 
 // ============================================================================
 // Types
@@ -115,7 +132,7 @@ export function discoverSessionFiles(projectPath?: string, currentCwd?: string):
 
     // If a specific project path is given, filter to match
     if (projectPath) {
-      const normalizedProjectPath = projectPath.replace(/\//g, '-').replace(/^-/, '');
+      const normalizedProjectPath = sanitizePath(projectPath);
       const dirName = projectDir.name.replace(/^-/, '');
 
       // Exact match (full path) or exact project name match (ends with -projectname)
@@ -158,7 +175,7 @@ export function discoverSessionFiles(projectPath?: string, currentCwd?: string):
 
       // If we already searched this as the primary projectPath, skip it here
       if (projectPath) {
-        const normalizedProjectPath = projectPath.replace(/\//g, '-').replace(/^-/, '');
+        const normalizedProjectPath = sanitizePath(projectPath);
         if (projectDir.name.replace(/^-/, '') === normalizedProjectPath) continue;
       }
 

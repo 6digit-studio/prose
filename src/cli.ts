@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Claude Prose CLI - Semantic memory for AI development sessions
+ * Prose CLI - Semantic memory for AI development sessions
  *
  * Commands:
  *   evolve   - Process sessions and evolve fragments
@@ -38,6 +38,7 @@ import {
   generateContextMarkdown,
   writeContextFile,
   writeVerbatimSessionArtifact,
+  sanitizePath,
 } from './memory.js';
 import { evolveHorizontal } from './horizontal.js';
 import { generateWebsite } from './web.js';
@@ -45,13 +46,21 @@ import { getGitCommits, isGitRepo, getAntigravityBrains, getAntigravityArtifacts
 import { startServer } from './server.js';
 import { injectMemory, ensureTemplate } from './injector.js';
 import { startDesignSession } from './design.js';
+import * as logger from './logger.js';
 
 const program = new Command();
 
 program
-  .name('claude-prose')
-  .description('Semantic memory for AI development sessions - extract, evolve, and query the meaning of your collaboration')
-  .version('0.1.0');
+  .name('prose')
+  .description('Semantic memory for AI development - extract, evolve, and query the meaning of your collaboration')
+  .version('0.1.0')
+  .option('--api-key <key>', 'Override LLM API key')
+  .option('-v, --verbose', 'Show detailed progress')
+  .option('-q, --quiet', 'Suppress unnecessary output')
+  .option('--trace', 'Show extremely detailed debugging logs')
+  .on('option:verbose', () => logger.setLogLevel(logger.LogLevel.VERBOSE))
+  .on('option:quiet', () => logger.setLogLevel(logger.LogLevel.ERROR))
+  .on('option:trace', () => logger.setLogLevel(logger.LogLevel.TRACE));
 
 // ============================================================================
 // init - Set up claude-prose in a project
@@ -85,7 +94,7 @@ program
         "hooks": [
           {
             "type": "command",
-            "command": "claude-prose evolve &",
+            "command": "prose evolve &",
             "timeout": 10
           }
         ]
@@ -130,7 +139,7 @@ program
     }
 
     // Default init behavior
-    console.log(`🧠 Initializing claude-prose for: ${projectName}\n`);
+    logger.info(`🧠 Initializing prose for: ${projectName}\n`);
     ensureTemplate(cwd);
 
     // Create .claude/commands directory
@@ -201,19 +210,19 @@ program
   .option('--artifacts', 'Export per-session Markdown artifacts', true)
   .option('--no-artifacts', 'Disable per-session artifact export')
   .action(async (options) => {
-    const apiKey = process.env.LLM_API_KEY || process.env.OPENROUTER_API_KEY || process.env.OPENAI_API_KEY;
+    const apiKey = options.apiKey || process.env.LLM_API_KEY || process.env.OPENROUTER_API_KEY || process.env.OPENAI_API_KEY;
     if (!apiKey) {
-      console.error('❌ No API key found. Set LLM_API_KEY, OPENROUTER_API_KEY, or OPENAI_API_KEY in .env or environment');
+      logger.error('No API key found. Set LLM_API_KEY, OPENROUTER_API_KEY, or OPENAI_API_KEY in .env or use --api-key');
       process.exit(1);
     }
 
-    console.log('🧬 Claude Prose - Evolving semantic memory\n');
+    logger.info('🧬 Prose - Evolving semantic memory\n');
 
     // Auto-detect project from current directory if not specified
     let projectFilter = options.project;
     if (!projectFilter) {
       const cwd = process.cwd();
-      const cwdSanitized = cwd.replace(/\//g, '-').replace(/^-/, '');
+      const cwdSanitized = sanitizePath(cwd);
 
       // Check for matching project directory in Claude's projects folder
       // This works even for new projects that haven't been processed yet
@@ -245,7 +254,7 @@ program
       const cwd = process.cwd();
       if (isGitRepo(cwd)) {
         const repoName = cwd.split('/').pop() || 'repo';
-        const project = projectFilter || cwd.replace(/\//g, '-').replace(/^-/, '');
+        const project = projectFilter || sanitizePath(cwd);
         const latestCommitDate = getLatestGitCommitDate(cwd);
         sessions.push({
           path: cwd,
@@ -293,29 +302,24 @@ program
     for (const session of sessions) {
       // Skip zero-size files
       if (session.fileSize === 0) {
-        if (trace) console.log(`  [TRACE] ${session.sessionId.slice(0, 8)}: skip (zero-size file)`);
+        logger.trace(`${session.sessionId.slice(0, 8)}: skip (zero-size file)`);
         continue;
       }
 
       // Load project memory for fast check
       const memory = loadProjectMemory(session.project);
       const state = getSessionProcessingState(memory, session.sessionId);
-
       if (!state) {
-        // Never processed - needs work
-        if (trace) console.log(`  [TRACE] ${session.sessionId.slice(0, 8)}: NEW (no prior state)`);
+        logger.trace(`${session.sessionId.slice(0, 8)}: NEW (no prior state)`);
         sessionsNeedingWork.push(session);
-      } else if (!state.fileSize) {
-        // Processed before fileSize tracking - needs update to establish baseline
-        if (trace) console.log(`  [TRACE] ${session.sessionId.slice(0, 8)}: baseline (has messageCount=${state.messageCount}, no fileSize)`);
+      } else if (state.fileSize === undefined) {
+        logger.trace(`${session.sessionId.slice(0, 8)}: baseline (has messageCount=${state.messageCount}, no fileSize)`);
         sessionsNeedingWork.push(session);
-      } else if (session.fileSize > state.fileSize || options.force) {
-        // File grew or force reprocess
-        if (trace) console.log(`  [TRACE] ${session.sessionId.slice(0, 8)}: ${options.force ? 'FORCE' : 'UPDATED'} (fileSize ${state.fileSize} -> ${session.fileSize})`);
+      } else if (options.force || session.fileSize > state.fileSize) {
+        logger.trace(`${session.sessionId.slice(0, 8)}: ${options.force ? 'FORCE' : 'UPDATED'} (fileSize ${state.fileSize} -> ${session.fileSize})`);
         sessionsNeedingWork.push(session);
       } else {
-        // Already processed and up to date
-        if (trace) console.log(`  [TRACE] ${session.sessionId.slice(0, 8)}: skip (up to date)`);
+        logger.trace(`${session.sessionId.slice(0, 8)}: skip (up to date)`);
       }
     }
 
@@ -326,7 +330,7 @@ program
     const sessionsToProcess = sessionsOldestFirst.slice(0, limit);
 
     if (options.verbose) {
-      console.log(`📁 Found ${sessions.length} sessions, ${sessionsNeedingWork.length} need work, processing ${sessionsToProcess.length}`);
+      logger.info(`📁 Found ${sessions.length} sessions, ${sessionsNeedingWork.length} need work, processing ${sessionsToProcess.length}`);
     }
 
     let processed = 0;
@@ -346,17 +350,17 @@ program
       let isIncremental = false;
 
       if (trace) {
-        console.log(`\n  [TRACE] === Processing ${session.sessionId.slice(0, 8)} ===`);
-        console.log(`  [TRACE] prevState: ${prevState ? `messageCount=${prevState.messageCount}, fileSize=${prevState.fileSize ?? 'undefined'}` : 'null'}`);
-        console.log(`  [TRACE] session: fileSize=${session.fileSize}`);
+        logger.trace(`=== Processing ${session.sessionId.slice(0, 8)} ===`);
+        logger.trace(`prevState: ${prevState ? `messageCount=${prevState.messageCount}, fileSize=${prevState.fileSize ?? 'undefined'}` : 'null'}`);
+        logger.trace(`session: fileSize=${session.fileSize}`);
       }
 
       if (session.sourceType === 'git') {
-        console.log(`📖 Syncing git log... (${session.sessionId})`);
+        logger.info(`📖 Syncing git log... (${session.sessionId})`);
         messagesToProcess = getGitCommits(session.path, 10);
         totalMessageCount = messagesToProcess.length; // Assuming getGitCommits returns all relevant commits
       } else if (session.sourceType === ('design' as any)) {
-        console.log(`📖 Syncing design session... (${session.sessionId})`);
+        logger.info(`📖 Syncing design session... (${session.sessionId})`);
         messagesToProcess = parseDesignSession(session.path, session.sessionId);
         totalMessageCount = messagesToProcess.length;
       } else if (session.sourceType === 'antigravity') {
@@ -560,7 +564,7 @@ program
         saveProjectMemory(updated);
 
         // Update CLAUDE.md from template if it exists and matches cwd
-        const cwdSanitized = process.cwd().replace(/\//g, '-').replace(/^-/, '');
+        const cwdSanitized = sanitizePath(process.cwd());
         if (projectName === cwdSanitized || projectName.endsWith(`-${cwdSanitized}`)) {
           injectMemory(process.cwd(), updated);
         }
@@ -579,7 +583,7 @@ program
     // Always attempt injection at the end for the current project
     if (!options.dryRun) {
       const cwd = process.cwd();
-      const cwdSanitized = cwd.replace(/\//g, '-').replace(/^-/, '');
+      const cwdSanitized = sanitizePath(cwd);
       const index = loadMemoryIndex();
       const detectedProject = Object.keys(index.projects).find(p =>
         p === cwdSanitized || p.endsWith(cwdSanitized) || cwdSanitized.endsWith(p.replace(/^-/, ''))
@@ -604,9 +608,9 @@ program
   .option('--to <project>', 'Target project (defaults to current)')
   .option('--dry-run', 'Show what would be merged without making changes')
   .action(async (options) => {
-    const apiKey = process.env.LLM_API_KEY || process.env.OPENROUTER_API_KEY || process.env.OPENAI_API_KEY;
+    const apiKey = options.apiKey || process.env.LLM_API_KEY || process.env.OPENROUTER_API_KEY || process.env.OPENAI_API_KEY;
     if (!apiKey) {
-      console.error('❌ No API key found. Set LLM_API_KEY, OPENROUTER_API_KEY, or OPENAI_API_KEY in .env or environment');
+      logger.error('No API key found. Set LLM_API_KEY, OPENROUTER_API_KEY, or OPENAI_API_KEY in .env or use --api-key');
       process.exit(1);
     }
 
@@ -619,7 +623,7 @@ program
     );
 
     if (!sourceProject) {
-      console.error(`❌ Source project not found: ${sourceQuery}`);
+      logger.error(`Source project not found: ${sourceQuery}`);
       process.exit(1);
     }
 
@@ -628,7 +632,7 @@ program
     let targetProject;
     if (!targetProjectQuery) {
       const cwd = process.cwd();
-      const cwdSanitized = cwd.replace(/\//g, '-').replace(/^-/, '');
+      const cwdSanitized = sanitizePath(cwd);
       targetProject = Object.keys(index.projects).find(p =>
         p === cwdSanitized || p.endsWith(cwdSanitized) || cwdSanitized.endsWith(p.replace(/^-/, ''))
       );
@@ -718,15 +722,15 @@ program
   .option('-p, --project <path>', 'Filter to specific project path')
   .option('--model <name>', 'Model to use', 'google/gemini-3-flash-preview')
   .action(async (options) => {
-    const apiKey = process.env.LLM_API_KEY || process.env.OPENROUTER_API_KEY || process.env.OPENAI_API_KEY;
+    const apiKey = options.apiKey || process.env.LLM_API_KEY || process.env.OPENROUTER_API_KEY || process.env.OPENAI_API_KEY;
     if (!apiKey) {
-      console.error('❌ No API key found. Set LLM_API_KEY, OPENROUTER_API_KEY, or OPENAI_API_KEY in .env or environment');
+      logger.error('No API key found. Set LLM_API_KEY, OPENROUTER_API_KEY, or OPENAI_API_KEY in .env or use --api-key');
       process.exit(1);
     }
 
     let projectFilter = options.project;
     const cwd = process.cwd();
-    const cwdSanitized = cwd.replace(/\//g, '-').replace(/^-/, '');
+    const cwdSanitized = sanitizePath(cwd);
 
     if (!projectFilter) {
       const index = loadMemoryIndex();
@@ -776,7 +780,7 @@ program
     } else if (!options.all) {
       // Try to match cwd to a project
       const cwd = process.cwd();
-      const cwdSanitized = cwd.replace(/\//g, '-').replace(/^-/, '');
+      const cwdSanitized = sanitizePath(cwd);
       const index = loadMemoryIndex();
       const matchingProject = Object.keys(index.projects).find(p =>
         p === cwdSanitized || p.endsWith(cwdSanitized) || cwdSanitized.endsWith(p.replace(/^-/, ''))
@@ -799,11 +803,11 @@ program
     }
 
     if (results.length === 0) {
-      console.log(`❌ No results found for "${query}"`);
+      logger.info(`No results found for "${query}"`);
       return;
     }
 
-    console.log(`🔍 Found ${results.length} results for "${query}":\n`);
+    logger.info(`🔍 Found ${results.length} results for "${query}":\n`);
 
     for (const result of results) {
       const typeIcon = {
@@ -818,8 +822,8 @@ program
       const dateStr = result.timestamp
         ? new Date(result.timestamp).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
         : '';
-      console.log(`${typeIcon} [${result.type}] (${project}) ${dateStr}`);
-      console.log(`   ${result.content}`);
+      logger.info(`${typeIcon} [${result.type}] (${project}) ${dateStr}`);
+      logger.info(`   ${result.content}`);
       if (result.context) {
         console.log(`   → ${result.context}`);
       }
@@ -842,7 +846,7 @@ program
     let detectedProject: string | undefined;
     if (!isGlobal) {
       const cwd = process.cwd();
-      const cwdSanitized = cwd.replace(/\//g, '-').replace(/^-/, '');
+      const cwdSanitized = sanitizePath(cwd);
       const index = loadMemoryIndex();
       detectedProject = Object.keys(index.projects).find(p =>
         p === cwdSanitized || p.endsWith(cwdSanitized) || cwdSanitized.endsWith(p.replace(/^-/, ''))
@@ -861,7 +865,7 @@ program
     if (detectedProject && !isGlobal) {
       // Project-specific status
       const shortName = detectedProject.replace(/^-Users-[^-]+-src-/, '');
-      console.log(`📊 ${shortName}\n`);
+      logger.info(`📊 ${shortName}\n`);
 
       // Raw session files for this project
       const sessions = discoverSessionFiles(detectedProject);
@@ -914,7 +918,7 @@ program
       const stats = getMemoryStats();
       const sessionStats = getSessionStats();
 
-      console.log('📊 Claude Prose - Global Status\n');
+      logger.info('📊 Prose - Global Status\n');
 
       console.log('📁 Available Sessions:');
       console.log(`   Total sessions: ${sessionStats.totalSessions}`);
@@ -1094,7 +1098,7 @@ program
   .option('-o, --output <dir>', 'Output directory', './claude-prose-web')
   .option('--open', 'Open in browser after generating')
   .action((options) => {
-    console.log('🌐 Generating Claude Prose website...\n');
+    logger.info('🌐 Generating Prose website...\n');
 
     generateWebsite(options.output);
 
@@ -1142,7 +1146,7 @@ program
     let projectName = options.project;
     if (!projectName) {
       const cwd = process.cwd();
-      const cwdSanitized = cwd.replace(/\//g, '-').replace(/^-/, '');
+      const cwdSanitized = sanitizePath(cwd);
       const projectsDir = getClaudeProjectsDir();
 
       if (existsSync(projectsDir)) {
@@ -1167,7 +1171,7 @@ program
       }
     }
 
-    console.log(`📦 Exporting verbatim artifacts for ${projectName}...`);
+    logger.info(`📦 Exporting verbatim artifacts for ${projectName}...`);
     const artifactsDir = join(process.cwd(), '.claude', 'prose');
     const sessions = discoverSessionFiles(projectName);
     let count = 0;
@@ -1176,7 +1180,7 @@ program
       writeVerbatimSessionArtifact(conv, artifactsDir);
       count++;
     }
-    console.log(`✅ Exported ${count} verbatim artifacts to ${artifactsDir}`);
+    logger.success(`Exported ${count} verbatim artifacts to ${artifactsDir}`);
   });
 
 program.parse();

@@ -1,19 +1,25 @@
 {
-  "name": "claude-prose",
+  "name": "prose-memory",
   "version": "0.1.0",
-  "description": "Semantic memory for AI development sessions - extract, evolve, and query the meaning of your collaboration",
+  "description": "Semantic memory for AI development - extract, evolve, and query the meaning of your collaboration",
   "type": "module",
   "main": "dist/index.js",
   "bin": {
-    "claude-prose": "dist/cli.js",
-    "fractal-grep": "dist/cli.js"
+    "prose": "dist/cli.js",
+    "claude-prose": "dist/cli.js"
   },
   "scripts": {
     "build": "tsc",
     "dev": "tsc --watch",
     "start": "node dist/cli.js",
-    "test": "node --test dist/**/*.test.js"
+    "test": "node --test dist/**/*.test.js",
+    "prepublishOnly": "npm run build"
   },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
   "keywords": [
     "ai",
     "claude",

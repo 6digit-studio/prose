@@ -7,17 +7,17 @@ import type { ProjectMemory } from './memory.js';
  */
 export function generateInstructions(): string {
     return `### 🧠 Semantic Memory & Search
-This project uses \`claude-prose\` to maintain a cross-session semantic memory of decisions, insights, and story beats.
+This project uses \`prose\` to maintain a cross-session semantic memory of decisions, insights, and story beats.
 
 - **Semantic Search**: If you're unsure about a past decision or need context on a feature, run:
   \`\`\`bash
-  claude-prose search "your question or keywords"
+  prose search "your question or keywords"
   \`\`\`
 - **Project Status**: To see a summary of recent sessions and evolved memory, run:
   \`\`\`bash
-  claude-prose status
+  prose status
   \`\`\`
-- **View Chronicles**: Run \`claude-prose serve\` to browse the interactive development timeline in your browser.
+- **View Chronicles**: Run \`prose serve\` to browse the interactive development timeline in your browser.
 `;
 }
 
