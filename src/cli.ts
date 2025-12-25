@@ -62,6 +62,44 @@ program
   .on('option:quiet', () => logger.setLogLevel(logger.LogLevel.ERROR))
   .on('option:trace', () => logger.setLogLevel(logger.LogLevel.TRACE));
 
+/**
+ * Helper to detect the current project based on CWD
+ */
+function detectProjectFromCwd(): string | undefined {
+  const cwd = process.cwd();
+  const cwdSanitized = sanitizePath(cwd);
+
+  // 1. Check evolved memory index
+  const index = loadMemoryIndex();
+  const indexMatch = Object.keys(index.projects).find(p =>
+    p === cwdSanitized || p.endsWith(cwdSanitized) || cwdSanitized.endsWith(p.replace(/^-/, ''))
+  );
+  if (indexMatch) return indexMatch;
+
+  // 2. Check Claude's projects directory for recent sessions
+  const projectsDir = getClaudeProjectsDir();
+  if (existsSync(projectsDir)) {
+    const projectDirs = readdirSync(projectsDir, { withFileTypes: true })
+      .filter(d => d.isDirectory())
+      .map(d => d.name);
+
+    const match = projectDirs.find(p => {
+      const dirName = p.replace(/^-/, '');
+      return dirName === cwdSanitized ||
+        dirName.endsWith(cwdSanitized) ||
+        cwdSanitized.endsWith(dirName);
+    });
+    if (match) return match;
+  }
+
+  // 3. Fallback: check session files discovered across all projects
+  const sessions = discoverSessionFiles();
+  const projectNames = [...new Set(sessions.map(s => s.project))];
+  return projectNames.find(p =>
+    p === cwdSanitized || p.endsWith(cwdSanitized) || cwdSanitized.endsWith(p.replace(/^-/, ''))
+  );
+}
+
 // ============================================================================
 // init - Set up prose in a project
 // ============================================================================
@@ -222,28 +260,9 @@ program
     // Auto-detect project from current directory if not specified
     let projectFilter = options.project;
     if (!projectFilter) {
-      const cwd = process.cwd();
-      const cwdSanitized = sanitizePath(cwd);
-
-      // Check for matching project directory in Claude's projects folder
-      // This works even for new projects that haven't been processed yet
-      const projectsDir = getClaudeProjectsDir();
-      if (existsSync(projectsDir)) {
-        const projectDirs = readdirSync(projectsDir, { withFileTypes: true })
-          .filter(d => d.isDirectory())
-          .map(d => d.name);
-
-        const matchingProject = projectDirs.find(p => {
-          const dirName = p.replace(/^-/, '');
-          return dirName === cwdSanitized ||
-            dirName.endsWith(cwdSanitized) ||
-            cwdSanitized.endsWith(dirName);
-        });
-
-        if (matchingProject) {
-          projectFilter = matchingProject;
-          console.log(`📁 Evolving: ${matchingProject.replace(/^-Users-[^-]+-src-/, '')}\n`);
-        }
+      projectFilter = detectProjectFromCwd();
+      if (projectFilter) {
+        logger.info(`📁 Evolving: ${projectFilter.replace(/^-Users-[^-]+-src-/, '')}\n`);
       }
     }
 
@@ -846,21 +865,7 @@ program
     // Try to detect project from CWD
     let detectedProject: string | undefined;
     if (!isGlobal) {
-      const cwd = process.cwd();
-      const cwdSanitized = sanitizePath(cwd);
-      const index = loadMemoryIndex();
-      detectedProject = Object.keys(index.projects).find(p =>
-        p === cwdSanitized || p.endsWith(cwdSanitized) || cwdSanitized.endsWith(p.replace(/^-/, ''))
-      );
-
-      // Also check raw session directories if not in evolved memory yet
-      if (!detectedProject) {
-        const sessions = discoverSessionFiles();
-        const projectNames = [...new Set(sessions.map(s => s.project))];
-        detectedProject = projectNames.find(p =>
-          p === cwdSanitized || p.endsWith(cwdSanitized) || cwdSanitized.endsWith(p.replace(/^-/, ''))
-        );
-      }
+      detectedProject = detectProjectFromCwd();
     }
 
     if (detectedProject && !isGlobal) {
@@ -947,26 +952,40 @@ program
 // ============================================================================
 
 program
-  .command('show <project>')
+  .command('show [project]')
   .description('Display current fragments for a project')
   .option('--decisions', 'Show only decisions')
   .option('--insights', 'Show only insights')
   .option('--narrative', 'Show only narrative')
   .option('--json', 'Output as JSON')
   .action((project, options) => {
-    // Try to match project by partial name
+    // Try to detect project if not specified
+    let matchedProject: string | undefined;
     const index = loadMemoryIndex();
     const projectNames = Object.keys(index.projects);
 
-    const matchedProject = projectNames.find(p =>
-      p.toLowerCase().includes(project.toLowerCase())
-    );
+    if (project) {
+      // Direct match or partial match
+      matchedProject = projectNames.find(p =>
+        p.toLowerCase().includes(project.toLowerCase())
+      );
+    } else {
+      // CWD detection
+      matchedProject = detectProjectFromCwd();
+    }
 
     if (!matchedProject) {
-      console.error(`❌ Project "${project}" not found`);
-      console.log('Available projects:');
-      for (const p of projectNames) {
-        console.log(`  - ${p.replace(/^-Users-[^-]+-src-/, '')}`);
+      if (project) {
+        logger.error(`Project "${project}" not found`);
+      } else {
+        logger.error('Could not detect project from current directory');
+      }
+
+      if (projectNames.length > 0) {
+        console.log('Available projects:');
+        for (const p of projectNames) {
+          console.log(`  - ${p.replace(/^-Users-[^-]+-src-/, '')}`);
+        }
       }
       process.exit(1);
     }
@@ -1043,24 +1062,36 @@ program
 // ============================================================================
 
 program
-  .command('context <project>')
+  .command('context [project]')
   .description('Generate context markdown for slash command injection')
   .option('-o, --output <path>', 'Output file path (default: stdout)')
   .option('--install', 'Install as Claude Code slash command in current project')
   .action((project, options) => {
-    // Try to match project by partial name
+    // Try to detect project if not specified
+    let matchedProject: string | undefined;
     const index = loadMemoryIndex();
     const projectNames = Object.keys(index.projects);
 
-    const matchedProject = projectNames.find(p =>
-      p.toLowerCase().includes(project.toLowerCase())
-    );
+    if (project) {
+      matchedProject = projectNames.find(p =>
+        p.toLowerCase().includes(project.toLowerCase())
+      );
+    } else {
+      matchedProject = detectProjectFromCwd();
+    }
 
     if (!matchedProject) {
-      console.error(`❌ Project "${project}" not found`);
-      console.log('Available projects:');
-      for (const p of projectNames) {
-        console.log(`  - ${p.replace(/^-Users-[^-]+-src-/, '')}`);
+      if (project) {
+        logger.error(`Project "${project}" not found`);
+      } else {
+        logger.error('Could not detect project from current directory');
+      }
+
+      if (projectNames.length > 0) {
+        console.log('Available projects:');
+        for (const p of projectNames) {
+          console.log(`  - ${p.replace(/^-Users-[^-]+-src-/, '')}`);
+        }
       }
       process.exit(1);
     }
@@ -1146,29 +1177,10 @@ program
   .action(async (options) => {
     let projectName = options.project;
     if (!projectName) {
-      const cwd = process.cwd();
-      const cwdSanitized = sanitizePath(cwd);
-      const projectsDir = getClaudeProjectsDir();
-
-      if (existsSync(projectsDir)) {
-        const projectDirs = readdirSync(projectsDir, { withFileTypes: true })
-          .filter(d => d.isDirectory())
-          .map(d => d.name);
-
-        const matchingProject = projectDirs.find(p => {
-          const dirName = p.replace(/^-/, '');
-          return dirName === cwdSanitized ||
-            dirName.endsWith(cwdSanitized) ||
-            cwdSanitized.endsWith(dirName);
-        });
-
-        if (matchingProject) {
-          projectName = matchingProject;
-        } else {
-          projectName = cwdSanitized;
-        }
-      } else {
-        projectName = cwdSanitized;
+      projectName = detectProjectFromCwd();
+      if (!projectName) {
+        logger.error('Could not detect project from current directory');
+        process.exit(1);
       }
     }
 
