@@ -142,10 +142,20 @@ export function loadMemoryIndex(): MemoryIndex {
     const parsed = JSON.parse(content);
 
     // Convert date strings back to Date objects
-    return {
+    const index: MemoryIndex = {
       ...parsed,
       lastUpdated: new Date(parsed.lastUpdated),
+      processingCursor: parsed.processingCursor ? new Date(parsed.processingCursor) : undefined,
     };
+
+    // Also convert project-level dates
+    for (const project of Object.values(index.projects)) {
+      if (project.lastUpdated) {
+        project.lastUpdated = new Date(project.lastUpdated);
+      }
+    }
+
+    return index;
   } catch (error) {
     console.error('Failed to load memory index:', error);
     return {
@@ -190,10 +200,22 @@ export function loadProjectMemory(projectName: string): ProjectMemory | null {
     return {
       ...parsed,
       lastUpdated: new Date(parsed.lastUpdated),
-      sourceLinks: parsed.sourceLinks?.map((sl: SourceLink) => ({
+      processedSessions: (parsed.processedSessions || []).map((s: any) => ({
+        ...s,
+        modifiedTime: new Date(s.modifiedTime),
+      })),
+      sessionSnapshots: (parsed.sessionSnapshots || []).map((s: any) => ({
+        ...s,
+        timestamp: new Date(s.timestamp),
+      })),
+      sourceLinks: (parsed.sourceLinks || []).map((sl: any) => ({
         ...sl,
         timestamp: new Date(sl.timestamp),
-      })) || [],
+      })),
+      history: (parsed.history || []).map((h: any) => ({
+        ...h,
+        timestamp: new Date(h.timestamp),
+      })),
     };
   } catch (error) {
     console.error(`Failed to load project memory for ${projectName}:`, error);

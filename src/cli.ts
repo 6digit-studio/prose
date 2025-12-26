@@ -544,12 +544,32 @@ program
     }
     console.log(`   Tokens used: ${totalTokens}`);
 
-    // Run horizontal evolution if we processed any sessions
-    if (processed > 0 && !options.dryRun) {
-      console.log('\n🔄 Running horizontal evolution...');
+    // Run horizontal evolution if we processed any sessions OR if the target project is stale relative to its links
+    const targetProjectName = projectFilter;
+    const targetMemory = targetProjectName ? loadProjectMemory(targetProjectName) : null;
+    let isStale = false;
+    if (targetMemory && (targetMemory.linkedProjects || []).length > 0) {
+      for (const link of targetMemory.linkedProjects!) {
+        const linkedMemory = loadProjectMemory(link);
+        if (linkedMemory && linkedMemory.lastUpdated > targetMemory.lastUpdated) {
+          isStale = true;
+          break;
+        }
+      }
+    }
 
-      // Get all unique projects that were processed
+    if ((processed > 0 || isStale) && !options.dryRun) {
+      if (isStale && processed === 0) {
+        logger.info(`🔄 Link Update: Project ${targetProjectName} is stale relative to its links. Re-evolving...`);
+      } else {
+        console.log('\n🔄 Running horizontal evolution...');
+      }
+
+      // Get all unique projects that were processed, plus the target if it's stale
       const projectsProcessed = [...new Set(sessionsToProcess.map(s => s.project))];
+      if (targetProjectName && isStale && !projectsProcessed.includes(targetProjectName)) {
+        projectsProcessed.push(targetProjectName);
+      }
 
       for (const projectName of projectsProcessed) {
         const memory = loadProjectMemory(projectName);
@@ -564,9 +584,23 @@ program
 
         const newSnapshots = memory.sessionSnapshots.filter(s => newSessionIds.has(s.sessionId));
 
-        if (newSnapshots.length === 0) {
+        let snapshotsToUse = newSnapshots;
+        if (snapshotsToUse.length === 0) {
+          if (projectName === targetProjectName && isStale) {
+            // Use the last 3 snapshots as context for re-evolution with new links
+            snapshotsToUse = memory.sessionSnapshots
+              .sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime())
+              .slice(0, 3);
+
+            if (options.verbose) {
+              logger.info(`   🔄 Using ${snapshotsToUse.length} existing snapshots for re-contextualization`);
+            }
+          }
+        }
+
+        if (snapshotsToUse.length === 0) {
           if (options.verbose) {
-            console.log(`   ⏭️ Skipping horizontal evolution for ${projectName}: No new snapshots found`);
+            console.log(`   ⏭️ Skipping horizontal evolution for ${projectName}: No snapshots found`);
           }
           continue;
         }
@@ -584,10 +618,10 @@ program
         }
 
         const result = await evolveHorizontal(
-          newSnapshots,
+          snapshotsToUse,
           {
             apiKey,
-            windowSize: newSnapshots.length,
+            windowSize: Math.max(snapshotsToUse.length, 3),
             currentFragments: memory.current,
             externalFragments: linkedFragments
           }
