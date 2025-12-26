@@ -20,7 +20,7 @@ config({ path: join(homedir(), '.config', 'prose', '.env'), quiet: true });  // 
 import { Command } from 'commander';
 import { discoverSessionFiles, parseSessionFile, parseSessionFileFromOffset, getSessionStats, getClaudeProjectsDir, type Message, type SessionFile } from './session-parser.js';
 import { evolveAllFragments } from './evolve.js';
-import { emptyFragments } from './schemas.js';
+import { emptyFragments, type AllFragments } from './schemas.js';
 import {
   loadMemoryIndex,
   saveMemoryIndex,
@@ -571,12 +571,25 @@ program
           continue;
         }
 
+        // Load linked projects
+        const linkedFragments: Array<{ projectName: string; fragments: AllFragments }> = [];
+        for (const linkedName of (memory.linkedProjects || [])) {
+          const linkedMemory = loadProjectMemory(linkedName);
+          if (linkedMemory) {
+            linkedFragments.push({
+              projectName: linkedName,
+              fragments: linkedMemory.current
+            });
+          }
+        }
+
         const result = await evolveHorizontal(
           newSnapshots,
           {
             apiKey,
             windowSize: newSnapshots.length,
-            currentFragments: memory.current
+            currentFragments: memory.current,
+            externalFragments: linkedFragments
           }
         );
 
@@ -733,7 +746,71 @@ program
   });
 
 // ============================================================================
-// design - Interactive session to shape memory
+// link - Manage persistent cross-project links
+// ============================================================================
+
+program
+  .command('link [target-project]')
+  .description('Manage persistent cross-project links for integrated context')
+  .option('--remove', 'Remove a link')
+  .option('--list', 'List all linked projects')
+  .action((targetProject, options) => {
+    const currentProject = detectProjectFromCwd();
+    if (!currentProject) {
+      logger.error('Could not detect current project from directory');
+      process.exit(1);
+    }
+
+    const memory = loadProjectMemory(currentProject);
+    if (!memory) {
+      logger.error(`No memory found for ${currentProject}. Run evolve first.`);
+      process.exit(1);
+    }
+
+    if (options.list || !targetProject) {
+      const links = memory.linkedProjects || [];
+      if (links.length === 0) {
+        logger.info(`Project ${currentProject} has no linked projects.`);
+      } else {
+        logger.info(`Linked projects for ${currentProject}:`);
+        links.forEach(l => console.log(`  - ${l}`));
+      }
+      return;
+    }
+
+    // Direct match or partial match for target
+    const index = loadMemoryIndex();
+    const projectNames = Object.keys(index.projects);
+    const matchedTarget = projectNames.find(p => p.toLowerCase().includes(targetProject.toLowerCase()));
+
+    if (!matchedTarget) {
+      logger.error(`Target project "${targetProject}" not found in memory index.`);
+      process.exit(1);
+    }
+
+    if (options.remove) {
+      const initialCount = (memory.linkedProjects || []).length;
+      memory.linkedProjects = (memory.linkedProjects || []).filter(p => p !== matchedTarget);
+      if ((memory.linkedProjects || []).length < initialCount) {
+        saveProjectMemory(memory);
+        logger.success(`Removed link: ${matchedTarget}`);
+      } else {
+        logger.info(`Project ${matchedTarget} was not linked.`);
+      }
+    } else {
+      if (!memory.linkedProjects) memory.linkedProjects = [];
+      if (!memory.linkedProjects.includes(matchedTarget)) {
+        memory.linkedProjects.push(matchedTarget);
+        saveProjectMemory(memory);
+        logger.success(`Linked ${matchedTarget} -> ${currentProject}`);
+      } else {
+        logger.info(`Project ${matchedTarget} is already linked.`);
+      }
+    }
+  });
+
+// ============================================================================
+// design - Start an interactive design session to shape memory
 // ============================================================================
 
 program

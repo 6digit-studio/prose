@@ -74,6 +74,8 @@ export interface ProjectMemory {
   sourceLinks: SourceLink[];
   /** Historical snapshots (optional, for time travel) */
   history?: MemorySnapshot[];
+  /** Projects linked for cross-project context injection */
+  linkedProjects?: string[];
 }
 
 export interface MemorySnapshot {
@@ -229,6 +231,7 @@ export function createProjectMemory(project: string): ProjectMemory {
     processedSessions: [],
     sessionSnapshots: [],
     sourceLinks: [],
+    linkedProjects: [],
     history: [],
   };
 }

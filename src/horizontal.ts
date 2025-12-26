@@ -36,6 +36,7 @@ export interface HorizontalEvolutionConfig {
   windowSize?: number;  // How many sessions to include (default: 3)
   currentFragments?: AllFragments; // Baseline to evolve from
   timeoutMs?: number; // Timeout in milliseconds (default: 60000)
+  externalFragments?: Array<{ projectName: string; fragments: AllFragments }>; // Linked projects
 }
 
 export interface HorizontalEvolutionResult {
@@ -79,6 +80,23 @@ ${JSON.stringify(s.fragments.focus, null, 2)}
     .join('\n---\n\n');
 }
 
+function formatExternalFragments(external?: Array<{ projectName: string; fragments: AllFragments }>): string {
+  if (!external || external.length === 0) return '';
+
+  return `\n## INTEGRATED CONTEXT (Linked Projects):
+These fragments come from higher-level or peer projects that this project is linked to.
+Use this for consistency and to avoid reinventing architectural or strategic wheels.
+
+${external.map(ex => `### Project: ${ex.projectName}
+${JSON.stringify({
+    decisions: ex.fragments.decisions,
+    insights: ex.fragments.insights,
+    focus: ex.fragments.focus
+  }, null, 2)}
+`).join('\n---\n')}
+`;
+}
+
 // ============================================================================
 // Horizontal Evolution
 // ============================================================================
@@ -97,6 +115,7 @@ async function evolveDecisionsHorizontal(
 ${baseline ? `\n## CURRENT Decisions (Baseline):
 ${JSON.stringify(baseline, null, 2)}
 ` : ''}
+${formatExternalFragments(config.externalFragments)}
 ## Recent Session Fragments (In reverse chronological order):
 ${formatFragmentsForEvolution(snapshots)}
 
@@ -129,6 +148,7 @@ async function evolveInsightsHorizontal(
 ${baseline ? `\n## CURRENT Insights (Baseline):
 ${JSON.stringify(baseline, null, 2)}
 ` : ''}
+${formatExternalFragments(config.externalFragments)}
 ## Recent Session Fragments:
 ${formatFragmentsForEvolution(snapshots)}
 
@@ -161,6 +181,7 @@ async function evolveFocusHorizontal(
 ${baseline ? `\n## CURRENT Focus (Baseline):
 ${JSON.stringify(baseline, null, 2)}
 ` : ''}
+${formatExternalFragments(config.externalFragments)}
 ## Recent Session Fragments:
 ${formatFragmentsForEvolution(snapshots)}
 
