@@ -2,12 +2,12 @@
   "name": "@6digit/prose",
   "version": "0.1.0-alpha.1",
   "description": "Semantic memory for AI development (EXPERIMENTAL/ALPHA)",
-  "author": "6digit",
+  "author": "6digit-studio",
   "repository": {
     "type": "git",
-    "url": "https://github.com/6digit/prose.git"
+    "url": "https://github.com/6digit-studio/prose.git"
   },
-  "homepage": "https://github.com/6digit/prose",
+  "homepage": "https://github.com/6digit-studio/prose",
   "type": "module",
   "main": "dist/index.js",
   "bin": {
