@@ -17,7 +17,7 @@ Prose is a universal semantic memory layer for your AI coding interactions. It e
 ### Installation
 
 ```bash
-npm install -g prose-memory
+npm install -g @6digit/prose
 ```
 
 ### Initialize a Project

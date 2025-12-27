@@ -1,7 +1,13 @@
 {
-  "name": "prose-memory",
+  "name": "@6digit/prose",
   "version": "0.1.0",
   "description": "Semantic memory for AI development - extract, evolve, and query the meaning of your collaboration",
+  "author": "6digit",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/6digit/prose.git"
+  },
+  "homepage": "https://github.com/6digit/prose",
   "type": "module",
   "main": "dist/index.js",
   "bin": {
@@ -26,7 +32,6 @@
     "development-history",
     "fragment-evolution"
   ],
-  "author": "",
   "license": "MIT",
   "dependencies": {
     "@ai-sdk/openai": "^1.0.0",
