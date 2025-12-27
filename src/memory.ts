@@ -11,6 +11,7 @@ import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs';
 import { join, dirname } from 'path';
 import { homedir } from 'os';
 import { execSync } from 'child_process';
+import { createHash } from 'crypto';
 
 import type { SourceLink, Message, Conversation } from './session-parser.js';
 import type { AllFragments, DecisionFragment, InsightFragment, NarrativeFragment, VocabularyFragment } from './schemas.js';
@@ -141,12 +142,25 @@ export function sanitizePath(path: string): string {
   return path.replace(/[/\\]/g, '-').replace(/^-+/, '');
 }
 
-/**
- * Get the path to a project's memory file
- */
 export function getProjectMemoryPath(projectName: string): string {
   const sanitized = projectName.replace(/[^a-zA-Z0-9-_]/g, '_');
   return join(getMemoryDir(), 'projects', `${sanitized}.json`);
+}
+
+/**
+ * Get the path to a project's vector file
+ */
+export function getProjectVectorPath(projectName: string): string {
+  const sanitized = projectName.replace(/[^a-zA-Z0-9-_]/g, '_');
+  return join(getMemoryDir(), 'projects', `${sanitized}.vectors.json`);
+}
+
+/**
+ * Generate a stable hash for a fragment
+ */
+export function calculateFragmentHash(type: string, content: string, context?: string): string {
+  const data = `${type}:${content}:${context || ''}`;
+  return createHash('sha256').update(data).digest('hex');
 }
 
 // ============================================================================
@@ -273,6 +287,39 @@ export function saveProjectMemory(memory: ProjectMemory): void {
 
   // Auto-commit to vault
   commitToVault(`Evolve: ${memory.project}`);
+}
+
+/**
+ * Load a project's vectors
+ */
+export function loadProjectVectors(projectName: string): Record<string, number[]> {
+  const vectorPath = getProjectVectorPath(projectName);
+
+  if (!existsSync(vectorPath)) {
+    return {};
+  }
+
+  try {
+    const content = readFileSync(vectorPath, 'utf-8');
+    return JSON.parse(content);
+  } catch (error) {
+    console.error(`Failed to load vectors for ${projectName}:`, error);
+    return {};
+  }
+}
+
+/**
+ * Save a project's vectors
+ */
+export function saveProjectVectors(projectName: string, vectors: Record<string, number[]>): void {
+  const vectorPath = getProjectVectorPath(projectName);
+  const dir = dirname(vectorPath);
+
+  if (!existsSync(dir)) {
+    mkdirSync(dir, { recursive: true });
+  }
+
+  writeFileSync(vectorPath, JSON.stringify(vectors, null, 2));
 }
 
 // ============================================================================
@@ -447,11 +494,15 @@ export interface SearchResult {
  * Search across all project memories
  * Searches sessionSnapshots for temporal awareness - newer results score higher
  */
-export function searchMemory(query: string, options?: {
+import { getJinaEmbeddings, cosineSimilarity } from './jina.js';
+
+export async function searchMemory(query: string, options?: {
   projects?: string[];
   types?: SearchResult['type'][];
   limit?: number;
-}): SearchResult[] {
+  jinaApiKey?: string;
+  all?: boolean;
+}): Promise<SearchResult[]> {
   const index = loadMemoryIndex();
   const results: SearchResult[] = [];
   const seen = new Set<string>(); // Dedupe by content hash
@@ -459,6 +510,19 @@ export function searchMemory(query: string, options?: {
   const queryTerms = query.toLowerCase().split(/\s+/).filter(t => t.length > 2);
   const projectFilter = options?.projects;
   const typeFilter = options?.types;
+
+  // Perform semantic search if API key is available
+  let queryVector: number[] | null = null;
+  if (options?.jinaApiKey) {
+    try {
+      const embeddings = await getJinaEmbeddings([query], options.jinaApiKey, { task: 'retrieval.query' });
+      if (embeddings.length > 0) {
+        queryVector = embeddings[0];
+      }
+    } catch (e) {
+      console.error('Semantic search failed, falling back to keywords:', e);
+    }
+  }
 
   // Find the time range for recency scoring
   let oldestTime = Date.now();
@@ -476,127 +540,81 @@ export function searchMemory(query: string, options?: {
 
   const timeRange = newestTime - oldestTime || 1; // Avoid division by zero
 
-  for (const [projectName, _projectInfo] of Object.entries(index.projects)) {
-    if (projectFilter && !projectFilter.includes(projectName)) {
+  for (const [projectName, projectInfo] of Object.entries(index.projects)) {
+    // CWD and Linked-Project Awareness
+    const isCurrentOrLinked = projectFilter && projectFilter.includes(projectName);
+    if (!options?.all && projectFilter && !isCurrentOrLinked) {
       continue;
     }
 
     const memory = loadProjectMemory(projectName);
     if (!memory?.sessionSnapshots) continue;
 
+    const vectors = loadProjectVectors(projectName);
+
     // Search through sessionSnapshots for temporal awareness
     for (const snapshot of memory.sessionSnapshots) {
       const timestamp = new Date(snapshot.timestamp);
-      const recencyBonus = ((timestamp.getTime() - oldestTime) / timeRange) * 10; // 0-10 bonus for recency
+      const recencyBonus = ((timestamp.getTime() - oldestTime) / timeRange) * 20; // 0-20 bonus for recency
 
-      // Search decisions
-      if (!typeFilter || typeFilter.includes('decision')) {
-        for (const decision of snapshot.fragments.decisions?.decisions || []) {
-          const contentHash = `decision:${decision.what}`;
-          if (seen.has(contentHash)) continue;
+      const searchFragments = (type: SearchResult['type'], items: any[], getContent: (item: any) => string, getContext?: (item: any) => string) => {
+        for (const item of items) {
+          const content = getContent(item);
+          const context = getContext ? getContext(item) : undefined;
+          const hash = calculateFragmentHash(type, content, context);
 
-          const keywordScore = scoreMatch(queryTerms, `${decision.what} ${decision.why}`);
-          if (keywordScore > 0) {
-            seen.add(contentHash);
+          if (seen.has(hash)) continue;
+
+          let score = 0;
+          const keywordScore = scoreMatch(queryTerms, `${content} ${context || ''}`);
+
+          // Vector Score
+          if (queryVector && vectors[hash]) {
+            const similarity = cosineSimilarity(queryVector, vectors[hash]);
+            score += similarity * 100;
+          }
+
+          // Keyword Score
+          score += keywordScore * 10;
+
+          if (score > 0 || (keywordScore > 0)) {
+            seen.add(hash);
             results.push({
               project: projectName,
-              type: 'decision',
-              content: decision.what,
-              context: decision.why,
-              score: keywordScore + recencyBonus,
+              type,
+              content,
+              context,
+              score: score + recencyBonus,
               timestamp,
             });
           }
         }
+      };
+
+      // Search decisions
+      if (!typeFilter || typeFilter.includes('decision')) {
+        searchFragments('decision', snapshot.fragments.decisions?.decisions || [], d => d.what, d => d.why);
       }
 
       // Search insights
       if (!typeFilter || typeFilter.includes('insight')) {
-        for (const insight of snapshot.fragments.insights?.insights || []) {
-          const contentHash = `insight:${insight.learning}`;
-          if (seen.has(contentHash)) continue;
-
-          const keywordScore = scoreMatch(queryTerms, `${insight.learning} ${insight.context}`);
-          if (keywordScore > 0) {
-            seen.add(contentHash);
-            results.push({
-              project: projectName,
-              type: 'insight',
-              content: insight.learning,
-              context: insight.context,
-              score: keywordScore + recencyBonus,
-              timestamp,
-            });
-          }
-        }
-      }
-
-      // Search gotchas
-      if (!typeFilter || typeFilter.includes('gotcha')) {
-        for (const gotcha of snapshot.fragments.insights?.gotchas || []) {
-          const contentHash = `gotcha:${gotcha.issue}`;
-          if (seen.has(contentHash)) continue;
-
-          const keywordScore = scoreMatch(queryTerms, `${gotcha.issue} ${gotcha.solution || ''}`);
-          if (keywordScore > 0) {
-            seen.add(contentHash);
-            results.push({
-              project: projectName,
-              type: 'gotcha',
-              content: gotcha.issue,
-              context: gotcha.solution,
-              score: keywordScore + recencyBonus,
-              timestamp,
-            });
-          }
-        }
+        searchFragments('insight', snapshot.fragments.insights?.insights || [], i => i.learning, i => i.context);
+        searchFragments('gotcha', snapshot.fragments.insights?.gotchas || [], g => g.issue, g => g.solution);
       }
 
       // Search narrative
       if (!typeFilter || typeFilter.includes('narrative')) {
-        for (const beat of snapshot.fragments.narrative?.story_beats || []) {
-          const contentHash = `narrative:${beat.summary.slice(0, 50)}`;
-          if (seen.has(contentHash)) continue;
-
-          const keywordScore = scoreMatch(queryTerms, beat.summary);
-          if (keywordScore > 0) {
-            seen.add(contentHash);
-            results.push({
-              project: projectName,
-              type: 'narrative',
-              content: beat.summary,
-              context: beat.beat_type,
-              score: keywordScore + recencyBonus,
-              timestamp,
-            });
-          }
-        }
+        searchFragments('narrative', snapshot.fragments.narrative?.story_beats || [], b => b.summary, b => b.beat_type);
       }
 
       // Search quotes
       if (!typeFilter || typeFilter.includes('quote')) {
-        for (const quote of snapshot.fragments.narrative?.memorable_quotes || []) {
-          const contentHash = `quote:${quote.quote.slice(0, 50)}`;
-          if (seen.has(contentHash)) continue;
-
-          const keywordScore = scoreMatch(queryTerms, quote.quote);
-          if (keywordScore > 0) {
-            seen.add(contentHash);
-            results.push({
-              project: projectName,
-              type: 'quote',
-              content: quote.quote,
-              context: quote.speaker,
-              score: keywordScore + recencyBonus,
-              timestamp,
-            });
-          }
-        }
+        searchFragments('quote', snapshot.fragments.narrative?.memorable_quotes || [], q => q.quote, q => q.speaker);
       }
     }
   }
 
-  // Sort by score descending (now includes recency)
+  // Sort by score descending
   results.sort((a, b) => b.score - a.score);
 
   // Apply limit

@@ -14,14 +14,8 @@ import { generateObject } from 'ai';
 import { z } from 'zod';
 
 import type { Message, SourceLink } from './session-parser.js';
+import type { AllFragments, FragmentType, DecisionFragment, InsightFragment, FocusFragment, NarrativeFragment, VocabularyFragment } from './schemas.js';
 import {
-  type AllFragments,
-  type FragmentType,
-  type DecisionFragment,
-  type InsightFragment,
-  type FocusFragment,
-  type NarrativeFragment,
-  type VocabularyFragment,
   DecisionSchema,
   InsightSchema,
   FocusSchema,
@@ -33,6 +27,8 @@ import {
   emptyNarrative,
   emptyVocabulary,
 } from './schemas.js';
+import { getJinaEmbeddings } from './jina.js';
+import { loadProjectVectors, saveProjectVectors, calculateFragmentHash } from './memory.js';
 
 // ============================================================================
 // Types
@@ -63,6 +59,7 @@ export interface EvolutionConfig {
   model?: string;
   temperature?: number;
   timeoutMs?: number; // Timeout in milliseconds (default: 60000)
+  jinaApiKey?: string;
 }
 
 // ============================================================================
@@ -405,14 +402,50 @@ export async function evolveAllFragments(
     ...vocabularyResult.sourceLinks,
   ];
 
+  const finalFragments = {
+    decisions: decisionsResult.data || currentFragments.decisions,
+    insights: insightsResult.data || currentFragments.insights,
+    focus: focusResult.data || currentFragments.focus,
+    narrative: narrativeResult.data || currentFragments.narrative,
+    vocabulary: vocabularyResult.data || currentFragments.vocabulary,
+  };
+
+  // Generate embeddings for new fragments if Jina key is provided
+  if (config.jinaApiKey && context.project) {
+    const vectors = loadProjectVectors(context.project);
+    const toEmbed: { hash: string; text: string }[] = [];
+
+    // Check decisions
+    for (const d of finalFragments.decisions?.decisions || []) {
+      const hash = calculateFragmentHash('decision', d.what, d.why);
+      if (!vectors[hash]) toEmbed.push({ hash, text: `${d.what} ${d.why}` });
+    }
+    // Check insights
+    for (const i of finalFragments.insights?.insights || []) {
+      const hash = calculateFragmentHash('insight', i.learning, i.context);
+      if (!vectors[hash]) toEmbed.push({ hash, text: `${i.learning} ${i.context}` });
+    }
+    // Check story beats
+    for (const b of finalFragments.narrative?.story_beats || []) {
+      const hash = calculateFragmentHash('narrative', b.summary, b.beat_type);
+      if (!vectors[hash]) toEmbed.push({ hash, text: b.summary });
+    }
+
+    if (toEmbed.length > 0) {
+      try {
+        const embeddings = await getJinaEmbeddings(toEmbed.map(e => e.text), config.jinaApiKey);
+        toEmbed.forEach((item, index) => {
+          vectors[item.hash] = embeddings[index];
+        });
+        saveProjectVectors(context.project, vectors);
+      } catch (e) {
+        errors.push(`Jina embedding failed during evolution: ${e instanceof Error ? e.message : String(e)}`);
+      }
+    }
+  }
+
   return {
-    fragments: {
-      decisions: decisionsResult.data || currentFragments.decisions,
-      insights: insightsResult.data || currentFragments.insights,
-      focus: focusResult.data || currentFragments.focus,
-      narrative: narrativeResult.data || currentFragments.narrative,
-      vocabulary: vocabularyResult.data || currentFragments.vocabulary,
-    },
+    fragments: finalFragments,
     tokensUsed,
     errors,
     sourceLinks: allSourceLinks,

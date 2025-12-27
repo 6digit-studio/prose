@@ -41,7 +41,11 @@ import {
   getMemoryDir,
   isVaultRepo,
   commitToVault,
+  loadProjectVectors,
+  saveProjectVectors,
+  calculateFragmentHash,
 } from './memory.js';
+import { getJinaEmbeddings, cosineSimilarity } from './jina.js';
 import { evolveHorizontal } from './horizontal.js';
 import { generateWebsite } from './web.js';
 import { getGitCommits, isGitRepo, getAntigravityBrains, getAntigravityArtifacts, parseAntigravityArtifact, matchBrainToProject, getLatestGitCommitDate, getDesignSessions, parseDesignSession } from './source-parsers.js';
@@ -498,6 +502,8 @@ program
           console.log(`   🔄 Window ${i + 1}/${windows.length} (${window.length} messages)`);
         }
 
+        const jinaApiKey = process.env.PROSE_JINA_API_KEY || process.env.PROSE_API_KEY;
+
         const result = await evolveAllFragments(
           currentFragments,
           {
@@ -506,7 +512,7 @@ program
             project: projectName,
             sessionId: session.sessionId,
           },
-          { apiKey }
+          { apiKey, jinaApiKey }
         );
 
         if (result.errors.length > 0 && options.verbose) {
@@ -912,7 +918,7 @@ program
   .option('-t, --type <types>', 'Filter by type: decision,insight,gotcha,narrative,quote', 'decision,insight,gotcha')
   .option('-l, --limit <n>', 'Limit results', '10')
   .option('--json', 'Output as JSON')
-  .action((query, options) => {
+  .action(async (query, options) => {
     const types = options.type.split(',') as any[];
     const limit = parseInt(options.limit, 10);
 
@@ -934,10 +940,14 @@ program
       }
     }
 
-    const results = searchMemory(query, {
+    const jinaApiKey = process.env.PROSE_JINA_API_KEY || process.env.PROSE_API_KEY || process.env.OPENROUTER_API_KEY;
+
+    const results = await searchMemory(query, {
       projects: projectFilter,
       types,
       limit,
+      jinaApiKey,
+      all: options.all,
     });
 
     if (options.json) {
@@ -1405,6 +1415,85 @@ vault
       logger.info('✅ Vault synchronized.');
     } catch (error: any) {
       logger.error(`⚠️  Sync failed: ${error.message}`);
+    }
+  });
+
+// ============================================================================
+// index - Manage semantic search vectors
+// ============================================================================
+
+const indexCmd = program.command('index').description('Manage semantic search vectors');
+
+indexCmd
+  .command('backfill')
+  .description('Generate missing embeddings for all existing project fragments')
+  .option('-p, --project <name>', 'Filter to specific project')
+  .action(async (options) => {
+    const apiKey = process.env.PROSE_JINA_API_KEY || process.env.PROSE_API_KEY || process.env.OPENROUTER_API_KEY;
+    if (!apiKey) {
+      logger.error('No Jina API key found. Set PROSE_JINA_API_KEY or PROSE_API_KEY');
+      process.exit(1);
+    }
+
+    const index = loadMemoryIndex();
+    const projectsToProcess = options.project
+      ? Object.keys(index.projects).filter(p => p === options.project)
+      : Object.keys(index.projects);
+
+    if (projectsToProcess.length === 0) {
+      logger.info('No projects found to backfill.');
+      return;
+    }
+
+    for (const projectName of projectsToProcess) {
+      logger.info(`🧠 Backfilling vectors for ${projectName}...`);
+      const memory = loadProjectMemory(projectName);
+      if (!memory) continue;
+
+      const vectors = loadProjectVectors(projectName);
+      const toEmbed: { hash: string; text: string }[] = [];
+
+      // Collect all fragments from session snapshots
+      for (const snapshot of memory.sessionSnapshots) {
+        // Decisions
+        for (const d of snapshot.fragments.decisions?.decisions || []) {
+          const hash = calculateFragmentHash('decision', d.what, d.why);
+          if (!vectors[hash]) toEmbed.push({ hash, text: `${d.what} ${d.why}` });
+        }
+        // Insights
+        for (const i of snapshot.fragments.insights?.insights || []) {
+          const hash = calculateFragmentHash('insight', i.learning, i.context);
+          if (!vectors[hash]) toEmbed.push({ hash, text: `${i.learning} ${i.context}` });
+        }
+        // Story beats
+        for (const b of snapshot.fragments.narrative?.story_beats || []) {
+          const hash = calculateFragmentHash('narrative', b.summary, b.beat_type);
+          if (!vectors[hash]) toEmbed.push({ hash, text: b.summary });
+        }
+      }
+
+      if (toEmbed.length === 0) {
+        logger.info(`✅ ${projectName} is already up to date.`);
+        continue;
+      }
+
+      logger.info(`📡 Requesting ${toEmbed.length} embeddings from Jina...`);
+      try {
+        // Process in batches of 50 to avoid Jina API limits
+        const batchSize = 50;
+        for (let i = 0; i < toEmbed.length; i += batchSize) {
+          const batch = toEmbed.slice(i, i + batchSize);
+          const embeddings = await getJinaEmbeddings(batch.map(b => b.text), apiKey);
+          batch.forEach((item, index) => {
+            vectors[item.hash] = embeddings[index];
+          });
+          logger.info(`   Progress: ${Math.min(i + batchSize, toEmbed.length)}/${toEmbed.length}`);
+        }
+        saveProjectVectors(projectName, vectors);
+        logger.success(`✅ ${projectName} backfill complete.`);
+      } catch (error: any) {
+        logger.error(`❌ Failed to backfill ${projectName}: ${error.message}`);
+      }
     }
   });
 

@@ -93,18 +93,21 @@ app.get('/api/projects/:id', (req, res) => {
 });
 
 // Search across all or specific project
-app.get('/api/search', (req, res) => {
+app.get('/api/search', async (req, res) => {
   const query = req.query.q as string;
-  const project = req.query.project as string | undefined;
+  const project = req.query.project as string;
 
   if (!query) {
     return res.status(400).json({ error: 'Query required' });
   }
 
-  const results = searchMemory(query, {
+  const jinaApiKey = process.env.PROSE_JINA_API_KEY || process.env.PROSE_API_KEY || process.env.LLM_API_KEY || process.env.OPENROUTER_API_KEY || process.env.OPENAI_API_KEY;
+
+  const results = await searchMemory(query, {
     projects: project ? [project] : undefined,
     types: ['decision', 'insight', 'gotcha', 'quote'],
     limit: 50,
+    jinaApiKey
   });
 
   res.json(results.map(r => ({

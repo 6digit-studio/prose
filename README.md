@@ -14,8 +14,9 @@ Prose is a universal semantic memory layer for your AI coding interactions. It e
 Prose is built using the [Vercel AI SDK](https://sdk.vercel.ai/) and is currently optimized/defaulted for **OpenRouter**. 
 
 - Defaults to `https://openrouter.ai/api/v1`
-- Requires `PROSE_API_KEY` (or fallback to `OPENROUTER_API_KEY`, `OPENAI_API_KEY`, or use the `--api-key` flag)
-- You can override the base URL via the `LLM_BASE_URL` environment variable if using other OpenAI-compatible providers.
+- Requires `PROSE_API_KEY` (or fallback to `OPENROUTER_API_KEY`, `OPENAI_API_KEY`, or use the `--api-key` flag).
+- `PROSE_API_KEY` is also used for Jina Semantic Retrieval unless `PROSE_JINA_API_KEY` is specifically set.
+- Override the base URL via `LLM_BASE_URL` for custom OpenAI-compatible providers.
 
 ## 🏛️ Personal Memory Vault
 
@@ -45,6 +46,7 @@ prose vault init [remote-url]
 - **Digital Archaeology**: Mirror binary session logs into human-readable Markdown for permanent archival.
 - **Agent Integration**: Automatically injects project context into `CLAUDE.md` to keep AI agents aligned.
 - **Interactive Chronicles**: Browse your development timeline with an interactive web dashboard.
+- **Semantic Retrieval**: Powered by Jina Embeddings v4 for state-of-the-art hybrid search (Vector + Keyword + Recency).
 
 ## 🚀 Quick Start
 
@@ -70,13 +72,15 @@ Process your latest sessions and update the project memory:
 prose evolve
 ```
 
-### Search Memory
-
-Query your project's semantic history:
-
 ```bash
 prose search "why did we choose the named-branch model?"
 ```
+
+### Jina Semantic Search (Optional)
+
+To enable advanced semantic retrieval, ensure your `PROSE_API_KEY` (or `PROSE_JINA_API_KEY`) is valid for Jina's services.
+- **Index Backfill**: `prose index backfill` to vectorize existing memory.
+- **Global Search**: `prose search --all "query"` to traverse your entire vault.
 
 ## 🧬 Core Philosophy
 
