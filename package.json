@@ -1,7 +1,7 @@
 {
   "name": "@6digit/prose",
-  "version": "0.1.0",
-  "description": "Semantic memory for AI development - extract, evolve, and query the meaning of your collaboration",
+  "version": "0.1.0-alpha.1",
+  "description": "Semantic memory for AI development (EXPERIMENTAL/ALPHA)",
   "author": "6digit",
   "repository": {
     "type": "git",

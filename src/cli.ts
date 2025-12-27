@@ -263,7 +263,9 @@ program
       process.exit(1);
     }
 
-    logger.info('🧬 Prose - Evolving semantic memory\n');
+    logger.info('🧬 Prose - Evolving semantic memory');
+    logger.warn('⚠️  ALPHA / EXPERIMENTAL: This tool is largely untested. Use at your own risk.');
+    logger.warn('💸 COST NOTICE: Evolution performs multiple LLM passes. Monitor token usage.\n');
 
     // Auto-detect project from current directory if not specified
     let projectFilter = options.project;

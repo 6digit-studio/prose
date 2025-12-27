@@ -2,7 +2,20 @@
 
 **Semantic memory for AI development.**
 
+> [!WARNING]
+> **ALPHA / EXPERIMENTAL**: This tool is currently in early development and is largely untested. Use at your own risk.
+>
+> **COST & TOKENS**: Prose performs multiple LLM passes for every evolution. It is **highly recommended** to use a limited API key or monitor your usage closely.
+
 Prose is a universal semantic memory layer for your AI coding interactions. It extracts decisions, insights, and narrative beats from session logs and evolves them into a persistent, searchable project consciousness.
+
+## 🤖 LLM Providers
+
+Prose is built using the [Vercel AI SDK](https://sdk.vercel.ai/) and is currently optimized/defaulted for **OpenRouter**. 
+
+- Defaults to `https://openrouter.ai/api/v1`
+- Requires `OPENROUTER_API_KEY` (or use the `--api-key` flag)
+- You can override the base URL via the `LLM_BASE_URL` environment variable if using other OpenAI-compatible providers.
 
 ## ✨ Features
 
