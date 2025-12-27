@@ -100,6 +100,14 @@ function detectProjectFromCwd(): string | undefined {
   );
 }
 
+/**
+ * Format a project name for display
+ */
+function formatProjectName(name: string | undefined): string {
+  if (!name) return 'Unknown';
+  return name.replace(/^-Users-[^-]+-src-/, '').replace(/^-/, '');
+}
+
 // ============================================================================
 // init - Set up prose in a project
 // ============================================================================
@@ -262,7 +270,7 @@ program
     if (!projectFilter) {
       projectFilter = detectProjectFromCwd();
       if (projectFilter) {
-        logger.info(`📁 Evolving: ${projectFilter.replace(/^-Users-[^-]+-src-/, '')}\n`);
+        logger.info(`📁 Evolving: ${formatProjectName(projectFilter)}\n`);
       }
     }
 
@@ -560,7 +568,7 @@ program
 
     if ((processed > 0 || isStale) && !options.dryRun) {
       if (isStale && processed === 0) {
-        logger.info(`🔄 Link Update: Project ${targetProjectName} is stale relative to its links. Re-evolving...`);
+        logger.info(`🔄 Link Update: Project ${formatProjectName(targetProjectName)} is stale relative to its links. Re-evolving...`);
       } else {
         console.log('\n🔄 Running horizontal evolution...');
       }
@@ -636,7 +644,7 @@ program
           injectMemory(process.cwd(), updated);
         }
 
-        console.log(`   ${projectName.replace(/^-Users-[^-]+-src-/, '')}: ${result.sessionsIncluded} sessions → current`);
+        console.log(`   ${formatProjectName(projectName)}: ${result.sessionsIncluded} sessions → current`);
         if (result.musings) {
           console.log(`   💭 ${result.musings.slice(0, 100)}...`);
         }
@@ -719,7 +727,7 @@ program
       process.exit(1);
     }
 
-    console.log(`🧬 Merging: ${sourceProject.replace(/^-Users-[^-]+-src-/, '')} → ${targetProject.replace(/^-Users-[^-]+-src-/, '')}\n`);
+    console.log(`🧬 Merging: ${formatProjectName(sourceProject)} → ${formatProjectName(targetProject)}\n`);
 
     const sourceMemory = loadProjectMemory(sourceProject);
     const targetMemory = loadProjectMemory(targetProject);
@@ -804,10 +812,10 @@ program
     if (options.list || !targetProject) {
       const links = memory.linkedProjects || [];
       if (links.length === 0) {
-        logger.info(`Project ${currentProject} has no linked projects.`);
+        logger.info(`Project ${formatProjectName(currentProject)} has no linked projects.`);
       } else {
-        logger.info(`Linked projects for ${currentProject}:`);
-        links.forEach(l => console.log(`  - ${l}`));
+        logger.info(`Linked projects for ${formatProjectName(currentProject)}:`);
+        links.forEach(l => console.log(`  - ${formatProjectName(l)}`));
       }
       return;
     }
@@ -918,7 +926,7 @@ program
       );
       if (matchingProject) {
         projectFilter = [matchingProject];
-        console.log(`📁 Searching in: ${matchingProject.replace(/^-Users-[^-]+-src-/, '')} (use --all for global search)\n`);
+        console.log(`📁 Searching in: ${formatProjectName(matchingProject)} (use --all for global search)\n`);
       }
     }
 
@@ -949,7 +957,7 @@ program
         quote: '💬',
       }[result.type];
 
-      const project = result.project.replace(/^-Users-[^-]+-src-/, '');
+      const project = formatProjectName(result.project);
       const dateStr = result.timestamp
         ? new Date(result.timestamp).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
         : '';
@@ -981,7 +989,7 @@ program
 
     if (detectedProject && !isGlobal) {
       // Project-specific status
-      const shortName = detectedProject.replace(/^-Users-[^-]+-src-/, '');
+      const shortName = formatProjectName(detectedProject);
       logger.info(`📊 ${shortName}\n`);
 
       // Raw session files for this project
@@ -1095,7 +1103,7 @@ program
       if (projectNames.length > 0) {
         console.log('Available projects:');
         for (const p of projectNames) {
-          console.log(`  - ${p.replace(/^-Users-[^-]+-src-/, '')}`);
+          console.log(`  - ${formatProjectName(p)}`);
         }
       }
       process.exit(1);
@@ -1112,7 +1120,7 @@ program
       return;
     }
 
-    const shortName = matchedProject.replace(/^-Users-[^-]+-src-/, '');
+    const shortName = formatProjectName(matchedProject);
     console.log(`🧠 Memory for: ${shortName}\n`);
     console.log(`   Sessions processed: ${memory.processedSessions.length}`);
     console.log(`   Last updated: ${memory.lastUpdated.toLocaleString()}\n`);
@@ -1201,7 +1209,7 @@ program
       if (projectNames.length > 0) {
         console.log('Available projects:');
         for (const p of projectNames) {
-          console.log(`  - ${p.replace(/^-Users-[^-]+-src-/, '')}`);
+          console.log(`  - ${formatProjectName(p)}`);
         }
       }
       process.exit(1);
