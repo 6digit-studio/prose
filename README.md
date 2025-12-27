@@ -17,6 +17,27 @@ Prose is built using the [Vercel AI SDK](https://sdk.vercel.ai/) and is currentl
 - Requires `OPENROUTER_API_KEY` (or use the `--api-key` flag)
 - You can override the base URL via the `LLM_BASE_URL` environment variable if using other OpenAI-compatible providers.
 
+## 🏛️ Personal Memory Vault
+
+Prose can turn your central memory storage into a **Personal Memory Vault** backed by Git. This allows you to version, sync, and protect your semantic history across all your projects.
+
+### Setup
+To initialize your vault:
+```bash
+prose vault init [remote-url]
+```
+
+### Features
+- **Auto-Commit**: Once initialized, `prose` will automatically commit changes to your vault after every `evolve` or `design` session.
+- **Synchronization**: Keep your memory updated across multiple machines:
+  ```bash
+  prose vault sync
+  ```
+- **Status Checks**: Monitor your vault state:
+  ```bash
+  prose vault status
+  ```
+
 ## ✨ Features
 
 - **Semantic Memory**: Automatically evolves a project-wide record of *why* things were done, not just *what* code changed.

@@ -10,6 +10,7 @@
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs';
 import { join, dirname } from 'path';
 import { homedir } from 'os';
+import { execSync } from 'child_process';
 
 import type { SourceLink, Message, Conversation } from './session-parser.js';
 import type { AllFragments, DecisionFragment, InsightFragment, NarrativeFragment, VocabularyFragment } from './schemas.js';
@@ -103,6 +104,36 @@ export function getIndexPath(): string {
 }
 
 /**
+ * Check if the memory vault is a Git repository
+ */
+export function isVaultRepo(): boolean {
+  const memoryDir = getMemoryDir();
+  return existsSync(join(memoryDir, '.git'));
+}
+
+/**
+ * Commit changes to the memory vault if it's a Git repo
+ */
+export function commitToVault(message: string): void {
+  if (!isVaultRepo()) return;
+
+  try {
+    const memoryDir = getMemoryDir();
+    // Use git add . to capture all changes (index + projects)
+    execSync(`git -C "${memoryDir}" add .`, { stdio: 'ignore' });
+
+    // Check if there are changes to commit
+    const status = execSync(`git -C "${memoryDir}" status --porcelain`, { encoding: 'utf-8' });
+    if (status.trim()) {
+      execSync(`git -C "${memoryDir}" commit -m "${message.replace(/"/g, '\\"')}"`, { stdio: 'ignore' });
+    }
+  } catch (error: any) {
+    // Don't crash on git errors, just log them
+    console.error(`⚠️  Vault commit failed: ${error.message}`);
+  }
+}
+
+/**
  * Sanitize a file path into a project name string.
  * Replaces both / and \ with - and removes leading dash.
  */
@@ -180,6 +211,9 @@ export function saveMemoryIndex(index: MemoryIndex): void {
 
   index.lastUpdated = new Date();
   writeFileSync(indexPath, JSON.stringify(index, null, 2));
+
+  // Auto-commit to vault
+  commitToVault('Update memory index');
 }
 
 /**
@@ -236,6 +270,9 @@ export function saveProjectMemory(memory: ProjectMemory): void {
 
   memory.lastUpdated = new Date();
   writeFileSync(memoryPath, JSON.stringify(memory, null, 2));
+
+  // Auto-commit to vault
+  commitToVault(`Evolve: ${memory.project}`);
 }
 
 // ============================================================================

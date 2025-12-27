@@ -34,11 +34,13 @@ import {
   getSessionProcessingState,
   searchMemory,
   getMemoryStats,
-  getMemoryDir,
   generateContextMarkdown,
   writeContextFile,
   writeVerbatimSessionArtifact,
   sanitizePath,
+  getMemoryDir,
+  isVaultRepo,
+  commitToVault,
 } from './memory.js';
 import { evolveHorizontal } from './horizontal.js';
 import { generateWebsite } from './web.js';
@@ -1315,6 +1317,95 @@ program
       count++;
     }
     logger.success(`Exported ${count} verbatim artifacts to ${artifactsDir}`);
+  });
+
+// ============================================================================
+// vault - Manage the personal memory storage repository
+// ============================================================================
+
+const vault = program.command('vault').description('Manage the personal memory vault (Git-backed storage)');
+
+vault
+  .command('init [remote]')
+  .description('Initialize the memory directory as a Git repository')
+  .action(async (remote) => {
+    const memoryDir = getMemoryDir();
+    if (!existsSync(memoryDir)) {
+      mkdirSync(memoryDir, { recursive: true });
+    }
+
+    if (isVaultRepo()) {
+      logger.info('🏛️  Vault already initialized.');
+    } else {
+      try {
+        const { execSync } = await import('child_process');
+        execSync(`git -C "${memoryDir}" init`, { stdio: 'inherit' });
+
+        // Add a .gitignore for common temp files if needed
+        const gitignorePath = join(memoryDir, '.gitignore');
+        if (!existsSync(gitignorePath)) {
+          writeFileSync(gitignorePath, '*.tmp\n*.bak\n');
+        }
+
+        execSync(`git -C "${memoryDir}" add .`, { stdio: 'inherit' });
+        execSync(`git -C "${memoryDir}" commit -m "Initialize Personal Memory Vault"`, { stdio: 'inherit' });
+        logger.info('✅ Vault initialized successfully.');
+      } catch (error: any) {
+        logger.error(`⚠️  Failed to initialize vault: ${error.message}`);
+        return;
+      }
+    }
+
+    if (remote) {
+      try {
+        const { execSync } = await import('child_process');
+        execSync(`git -C "${memoryDir}" remote add origin "${remote}"`, { stdio: 'inherit' });
+        logger.info(`🔗 Remote added: ${remote}`);
+      } catch (error: any) {
+        logger.error(`⚠️  Failed to add remote: ${error.message}`);
+      }
+    }
+  });
+
+vault
+  .command('status')
+  .description('Show the status of the memory vault')
+  .action(async () => {
+    if (!isVaultRepo()) {
+      logger.error('❌ Vault not initialized. Run "prose vault init" first.');
+      return;
+    }
+
+    try {
+      const { execSync } = await import('child_process');
+      const memoryDir = getMemoryDir();
+      const output = execSync(`git -C "${memoryDir}" status`, { encoding: 'utf-8' });
+      console.log(output);
+    } catch (error: any) {
+      logger.error(`⚠️  Failed to get vault status: ${error.message}`);
+    }
+  });
+
+vault
+  .command('sync')
+  .description('Synchronize the vault with the remote repository')
+  .action(async () => {
+    if (!isVaultRepo()) {
+      logger.error('❌ Vault not initialized. Run "prose vault init" first.');
+      return;
+    }
+
+    try {
+      const { execSync } = await import('child_process');
+      const memoryDir = getMemoryDir();
+
+      logger.info('🔄 Syncing vault...');
+      execSync(`git -C "${memoryDir}" pull --rebase origin main || git -C "${memoryDir}" pull --rebase origin master`, { stdio: 'inherit' });
+      execSync(`git -C "${memoryDir}" push origin main || git -C "${memoryDir}" push origin master`, { stdio: 'inherit' });
+      logger.info('✅ Vault synchronized.');
+    } catch (error: any) {
+      logger.error(`⚠️  Sync failed: ${error.message}`);
+    }
   });
 
 program.parse();
