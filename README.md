@@ -14,7 +14,7 @@ Prose is a universal semantic memory layer for your AI coding interactions. It e
 Prose is built using the [Vercel AI SDK](https://sdk.vercel.ai/) and is currently optimized/defaulted for **OpenRouter**. 
 
 - Defaults to `https://openrouter.ai/api/v1`
-- Requires `OPENROUTER_API_KEY` (or use the `--api-key` flag)
+- Requires `PROSE_API_KEY` (or fallback to `OPENROUTER_API_KEY`, `OPENAI_API_KEY`, or use the `--api-key` flag)
 - You can override the base URL via the `LLM_BASE_URL` environment variable if using other OpenAI-compatible providers.
 
 ## 🏛️ Personal Memory Vault

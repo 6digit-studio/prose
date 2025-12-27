@@ -259,9 +259,9 @@ program
   .option('--artifacts', 'Export per-session Markdown artifacts', true)
   .option('--no-artifacts', 'Disable per-session artifact export')
   .action(async (options) => {
-    const apiKey = options.apiKey || process.env.LLM_API_KEY || process.env.OPENROUTER_API_KEY || process.env.OPENAI_API_KEY;
+    const apiKey = options.apiKey || process.env.PROSE_API_KEY || process.env.LLM_API_KEY || process.env.OPENROUTER_API_KEY || process.env.OPENAI_API_KEY;
     if (!apiKey) {
-      logger.error('No API key found. Set LLM_API_KEY, OPENROUTER_API_KEY, or OPENAI_API_KEY in .env or use --api-key');
+      logger.error('No API key found. Set PROSE_API_KEY, LLM_API_KEY, or OPENROUTER_API_KEY in .env or use --api-key');
       process.exit(1);
     }
 
@@ -687,9 +687,9 @@ program
   .option('--to <project>', 'Target project (defaults to current)')
   .option('--dry-run', 'Show what would be merged without making changes')
   .action(async (options) => {
-    const apiKey = options.apiKey || process.env.LLM_API_KEY || process.env.OPENROUTER_API_KEY || process.env.OPENAI_API_KEY;
+    const apiKey = options.apiKey || process.env.PROSE_API_KEY || process.env.LLM_API_KEY || process.env.OPENROUTER_API_KEY || process.env.OPENAI_API_KEY;
     if (!apiKey) {
-      logger.error('No API key found. Set LLM_API_KEY, OPENROUTER_API_KEY, or OPENAI_API_KEY in .env or use --api-key');
+      logger.error('No API key found. Set PROSE_API_KEY, LLM_API_KEY, or OPENROUTER_API_KEY in .env or use --api-key');
       process.exit(1);
     }
 
@@ -865,9 +865,9 @@ program
   .option('-p, --project <path>', 'Filter to specific project path')
   .option('--model <name>', 'Model to use', 'google/gemini-3-flash-preview')
   .action(async (options) => {
-    const apiKey = options.apiKey || process.env.LLM_API_KEY || process.env.OPENROUTER_API_KEY || process.env.OPENAI_API_KEY;
+    const apiKey = options.apiKey || process.env.PROSE_API_KEY || process.env.LLM_API_KEY || process.env.OPENROUTER_API_KEY || process.env.OPENAI_API_KEY;
     if (!apiKey) {
-      logger.error('No API key found. Set LLM_API_KEY, OPENROUTER_API_KEY, or OPENAI_API_KEY in .env or use --api-key');
+      logger.error('No API key found. Set PROSE_API_KEY, LLM_API_KEY, or OPENROUTER_API_KEY in .env or use --api-key');
       process.exit(1);
     }
 
