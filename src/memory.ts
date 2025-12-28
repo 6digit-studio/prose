@@ -53,6 +53,12 @@ export interface GlobalConfig {
   artifacts?: boolean;
   /** Where should artifacts be stored? 'vault' or 'local' */
   mirrorMode?: 'vault' | 'local';
+  /** File extensions to index for source code search */
+  sourceExtensions?: string[];
+  /** Automatically re-index source during 'evolve' when git HEAD changes */
+  autoIndexSource?: boolean;
+  /** Cosine similarity threshold for vector search (0.0-1.0) */
+  vectorThreshold?: number;
 }
 
 export interface SessionProcessingState {
@@ -248,6 +254,12 @@ export function loadMemoryIndex(): MemoryIndex {
 /**
  * Get effective global configuration (Env > Saved Config > Defaults)
  */
+/** Default file extensions for source code indexing */
+export const DEFAULT_SOURCE_EXTENSIONS = ['.ts', '.js', '.py', '.go'];
+
+/** Default cosine similarity threshold for vector search */
+export const DEFAULT_VECTOR_THRESHOLD = 0.6;
+
 export function getGlobalConfig(): GlobalConfig {
   const index = loadMemoryIndex();
   const saved = index.config || {};
@@ -256,7 +268,10 @@ export function getGlobalConfig(): GlobalConfig {
     artifacts: process.env.PROSE_ARTIFACTS !== undefined
       ? process.env.PROSE_ARTIFACTS === 'true'
       : (saved.artifacts !== undefined ? saved.artifacts : true),
-    mirrorMode: (process.env.PROSE_MIRROR_MODE as any) || saved.mirrorMode || 'vault'
+    mirrorMode: (process.env.PROSE_MIRROR_MODE as any) || saved.mirrorMode || 'vault',
+    sourceExtensions: saved.sourceExtensions || DEFAULT_SOURCE_EXTENSIONS,
+    autoIndexSource: saved.autoIndexSource !== undefined ? saved.autoIndexSource : true,
+    vectorThreshold: saved.vectorThreshold !== undefined ? saved.vectorThreshold : DEFAULT_VECTOR_THRESHOLD
   };
 }
 
@@ -591,9 +606,13 @@ export async function searchMemory(query: string, options?: {
   jinaApiKey?: string;
   all?: boolean;
 }): Promise<SearchResult[]> {
+  const config = getGlobalConfig();
   const index = loadMemoryIndex();
   const results: SearchResult[] = [];
   const seen = new Set<string>(); // Dedupe by content hash
+
+  // Use configured threshold (default 0.6) converted to 0-100 scale
+  const vectorThreshold = (config.vectorThreshold ?? DEFAULT_VECTOR_THRESHOLD) * 100;
 
   const queryTerms = query.toLowerCase().split(/\s+/).filter(t => t.length > 2);
   const projectFilter = options?.projects;
@@ -668,10 +687,10 @@ export async function searchMemory(query: string, options?: {
             score = keywordScore * 10;
           }
 
-          // Threshold: cosine > 0.6 for vectors, or ALL query terms must match for keywords
+          // Threshold: use configured vectorThreshold for vectors, or ALL query terms must match for keywords
           // scoreMatch gives 15 per term, we multiply by 10, so threshold = terms * 150
           const minKeywordScore = queryTerms.length * 150;
-          const threshold = hasVector ? 60 : minKeywordScore;
+          const threshold = hasVector ? vectorThreshold : minKeywordScore;
           if (score >= threshold) {
             seen.add(hash);
             results.push({
@@ -742,9 +761,9 @@ export async function searchMemory(query: string, options?: {
               score = keywordScore * 10;
             }
 
-            // Threshold: cosine > 0.6 for vectors, or ALL query terms must match for keywords
+            // Threshold: use configured vectorThreshold for vectors, or ALL query terms must match for keywords
             const minKeywordScore = queryTerms.length * 150;
-            const threshold = hasVector ? 60 : minKeywordScore;
+            const threshold = hasVector ? vectorThreshold : minKeywordScore;
             if (score >= threshold) {
               seen.add(hash);
               results.push({

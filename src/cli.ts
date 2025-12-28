@@ -721,8 +721,8 @@ program
     console.log(`   Total tokens: ${totalTokens}`);
     console.log(`   Memory stored: ${getMemoryDir()}`);
 
-    // Auto-index source code if git HEAD has changed
-    if (!options.dryRun && jinaApiKey) {
+    // Auto-index source code if git HEAD has changed (respects config.autoIndexSource)
+    if (!options.dryRun && jinaApiKey && config.autoIndexSource !== false) {
       const cwd = process.cwd();
       const detectedProject = projectFilter || detectProjectFromCwd();
 
@@ -732,10 +732,12 @@ program
         const manifest = loadSourceManifest(detectedProject);
 
         if (!manifest || manifest.gitHead !== currentHead) {
+          // Use configured extensions for the diff check
+          const extGlobs = (config.sourceExtensions || ['.ts', '.js']).map(ext => `'*${ext}'`).join(' ');
           const changedFiles = manifest?.gitHead
             ? (() => {
                 try {
-                  const diff = execSync(`git diff --name-only ${manifest.gitHead}..${currentHead} -- '*.ts' '*.js'`, { encoding: 'utf-8', cwd });
+                  const diff = execSync(`git diff --name-only ${manifest.gitHead}..${currentHead} -- ${extGlobs}`, { encoding: 'utf-8', cwd });
                   return diff.split('\n').filter(Boolean).length;
                 } catch { return '?'; }
               })()
@@ -1438,23 +1440,42 @@ program
 const configCmd = program.command('config').description('Manage global configuration settings');
 
 configCmd
-  .command('set <key> <value>')
-  .description('Set a global configuration value')
-  .action((key, value) => {
-    const config = getGlobalConfig();
+  .command('set <key> <value...>')
+  .description('Set a global configuration value (use space-separated values for arrays)')
+  .action((key, values) => {
+    const value = values.length === 1 ? values[0] : values;
 
     if (key === 'artifacts') {
       saveGlobalConfig({ artifacts: value === 'true' });
-      logger.success(`Set global artifacts to: ${value === 'true'}`);
+      logger.success(`Set artifacts to: ${value === 'true'}`);
     } else if (key === 'mirror-mode') {
       if (value !== 'vault' && value !== 'local') {
         logger.error('mirror-mode must be "vault" or "local"');
         process.exit(1);
       }
       saveGlobalConfig({ mirrorMode: value as any });
-      logger.success(`Set global mirror-mode to: ${value}`);
+      logger.success(`Set mirror-mode to: ${value}`);
+    } else if (key === 'source-extensions') {
+      // Accept space-separated extensions: prose config set source-extensions .ts .js .svelte
+      const extensions = Array.isArray(value) ? value : [value];
+      // Ensure each extension starts with a dot
+      const normalized = extensions.map(ext => ext.startsWith('.') ? ext : `.${ext}`);
+      saveGlobalConfig({ sourceExtensions: normalized });
+      logger.success(`Set source-extensions to: ${normalized.join(', ')}`);
+    } else if (key === 'auto-index-source') {
+      saveGlobalConfig({ autoIndexSource: value === 'true' });
+      logger.success(`Set auto-index-source to: ${value === 'true'}`);
+    } else if (key === 'vector-threshold') {
+      const threshold = parseFloat(value as string);
+      if (isNaN(threshold) || threshold < 0 || threshold > 1) {
+        logger.error('vector-threshold must be a number between 0.0 and 1.0');
+        process.exit(1);
+      }
+      saveGlobalConfig({ vectorThreshold: threshold });
+      logger.success(`Set vector-threshold to: ${threshold}`);
     } else {
       logger.error(`Unknown configuration key: ${key}`);
+      logger.info('Valid keys: artifacts, mirror-mode, source-extensions, auto-index-source, vector-threshold');
       process.exit(1);
     }
   });
@@ -1465,8 +1486,13 @@ configCmd
   .action(() => {
     const config = getGlobalConfig();
     logger.info('📊 Prose - Global Configuration\n');
-    console.log(`   artifacts: ${config.artifacts}`);
-    console.log(`   mirror-mode: ${config.mirrorMode}`);
+    console.log('   General:');
+    console.log(`     artifacts: ${config.artifacts}`);
+    console.log(`     mirror-mode: ${config.mirrorMode}`);
+    console.log('\n   Source Indexing:');
+    console.log(`     source-extensions: ${config.sourceExtensions?.join(', ') || '(none)'}`);
+    console.log(`     auto-index-source: ${config.autoIndexSource}`);
+    console.log(`     vector-threshold: ${config.vectorThreshold}`);
     console.log(`\n📂 Vault location: ${getMemoryDir()}`);
   });
 

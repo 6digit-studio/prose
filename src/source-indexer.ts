@@ -142,7 +142,8 @@ import {
     saveSourceManifest,
     loadSourceVectors,
     saveSourceVectors,
-    commitToVault
+    commitToVault,
+    getGlobalConfig
 } from './memory.js';
 
 /**
@@ -164,6 +165,7 @@ export async function indexProjectSource(projectName: string, dir: string, apiKe
     chunksCreated: number,
     tokensUsed: number
 }> {
+    const config = getGlobalConfig();
     const currentHead = getGitHead(dir);
     const existingManifest = loadSourceManifest(projectName) as SourceManifest;
     const existingVectorData = loadSourceVectors(projectName); // Should return { vectors: number[][], hashes: string[] }
@@ -177,7 +179,7 @@ export async function indexProjectSource(projectName: string, dir: string, apiKe
         }
     }
 
-    const allFiles = getProjectFiles(dir);
+    const allFiles = getProjectFiles(dir, config.sourceExtensions);
     const manifest: SourceManifest = {
         version: 1,
         project: projectName,
