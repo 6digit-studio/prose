@@ -1,32 +1,38 @@
 # Claude Prose - Development Guide
 
 ## Project Awareness
-Building a robust session management and evolution system (prose) featuring a web-based viewer, temporal search, and CWD-aware CLI tools.
+Migrate storage directory from ~/.claude-prose to ~/.prose to align with project rebranding.
 
 ## Critical Decisions
-- **Horizontal Evolution with a fixed rolling window constraint.**: To improve session snapshot compression and predictability while avoiding complex algorithmic pruning.
-- **Zero-config CWD-awareness for CLI commands (search, evolve, status).**: To improve developer ergonomics by automatically detecting the active project based on the current directory.
-- **Fast incremental evolution using stat() checks and byte-offset reading.**: To minimize token usage and processing time by only analyzing new messages in a session.
-- **Interactive web dashboard via `prose serve`.**: To provide a browsable interface for project fragments (Decisions, Insights, Gotchas) and historical session data.
-- **Renamed /memory command to /flash.**: To prevent namespace collisions with built-in Claude Code commands.
-- **Global configuration via ~/.config/prose/.env.**: To securely manage API keys and settings outside of the project codebase.
-- **Opt-in background evolution via `init hooks`.**: To allow automatic memory updates during the `/compact` cycle without forcing it on all developers.
+- **Rebranded project from 'claude-prose' to 'prose'.**: To transition from a tool-specific extension to a universal semantic memory layer.
+- **Renamed storage directory from ~/.claude-prose to ~/.prose with automatic migration.**: To align with rebranding while ensuring zero-config transitions for existing users via renameSync.
+- **Integrated Jina AI (v3/v4) for semantic retrieval and hybrid search.**: To enable deep conceptual search using a combination of Cosine Similarity, Recency, and Keyword matching.
+- **Adopted Git as the 'Personal Vault' storage engine for ~/.prose.**: Provides built-in versioning, synchronization, and audit trails for semantic history without custom sync logic.
+- **Implemented Persistent Cross-Project Links via `prose link`.**: Allows architectural alignment across workspaces by injecting state from linked projects into the evolution context.
+- **Broadened evolution triggers to include 'stale' projects with linked dependencies.**: Ensures projects reflect changes in dependencies even when no new local sessions exist, using a fallback window of existing snapshots.
+- **Implemented 'Intelligent Design' CLI for manual memory refinement.**: Provides a 'sudo' for project context, allowing human-dictated ground truth to override automated LLM summaries.
+- **Implemented Verbatim Session Mirroring to permanent Markdown files.**: Prevents context loss from Claude Code's log pruning and preserves the nuance of original developer intent.
+- **Refactored session-parser.ts and added LLM timeouts (60s).**: To fix infinite loops in parsing and prevent the CLI from hanging on network/API delays.
+- **Included 'agent-' sessions and broadened CWD-based project detection.**: To ensure the tool learns from its own agentic actions and finds sessions even when directory names don't match perfectly.
 
 ## Project Insights
-- Using `stat()` checks and byte-offset reading allows for 'zero-parsing' checks, significantly speeding up the detection of sessions that actually need processing.
-- A 'zero-config' philosophy driven by CWD-awareness (Current Working Directory) reduces user friction by auto-detecting the active project for status, search, and evolution.
-- 'Horizontal Evolution' (compressing the last N snapshots) combined with temporal search (recency-weighted relevance) provides a more predictable and useful context than complex algorithmic pruning.
-- Using Gemini Flash for semantic extraction keeps costs low (~$0.07/session), making frequent background evolution viable.
-- Providing an `init hooks` command allows developers to opt-in to auto-evolution during `/compact` via gitignored hooks, ensuring memory stays fresh without manual intervention.
+- Automatic migration should be handled at the initialization layer (e.g., getMemoryDir) to ensure zero-config transitions for existing users.
+- Hybrid search scoring should combine Cosine Similarity with Recency and Keyword bonuses; 'new' is often as important as 'relevant' in development.
+- Human-directed corrections (Design Sessions) must be treated as absolute ground truth and prioritized over automated LLM summaries to prevent semantic drift.
+- Treating the central storage directory as a Git repository provides built-in versioning, audit trails, and synchronization without custom sync logic.
+- Evolution should be triggered by 'staleness' (linked project updates) even without local sessions, using the last N snapshots as a context fallback.
+- CWD-awareness reduces friction; if detection fails, the CLI should transition to 'discovery mode' by listing available valid projects.
 
 ## Active Gotchas
-- **Incorrect project matching using `includes()` caused expensive processing of unrelated projects.**: Use exact matches or strict `-projectname` suffix matching for project filtering.
-- **Token usage bloat and non-incremental evolution when processing entire session files.**: Implemented fast incremental updates using `stat()` checks and byte-offset reading to process only new messages.
-- **Command name collision with built-in environment commands (specifically `/memory`).**: Renamed the command to `/flash`.
+- **Directly renaming directories with `renameSync` can fail across different partitions or filesystems.**: Use a copy-and-delete fallback if `renameSync` fails, though `~` migrations usually succeed with rename.
+- **Infinite loops in session parsing when 'continue' statements bypass the offset increment logic.**: Ensure `currentOffset` is incremented at the very end of the loop body, regardless of conditional skips.
+- **LLM API calls hanging indefinitely, blocking CLI execution.**: Implement `AbortSignal.timeout(60000)` (60s) for all generation calls to ensure a fail-safe exit.
+- **Stalled evolution caused by filtering out 'agent-' prefixed session files.**: Include 'agent-' sessions in discovery to allow the tool to learn from its own automated actions.
+- **Claude Code prunes session logs, leading to permanent loss of historical context.**: Implement Verbatim Session Mirroring to permanent Markdown files during the evolution loop.
 
 ## Usage Instructions
 ### 🧠 Semantic Memory & Search
-This project uses `claude-prose` to maintain a cross-session semantic memory of decisions, insights, and story beats.
+This project uses `prose` to maintain a cross-session semantic memory of decisions, insights, and story beats.
 
 - **Semantic Search**: If you're unsure about a past decision or need context on a feature, run:
   ```bash
@@ -53,4 +59,4 @@ This project uses `claude-prose` to maintain a cross-session semantic memory of 
 
 > [!NOTE]
 > This file is automatically generated from `CLAUDE.md.template` by `prose`.
-> Last updated: 12/23/2025, 4:31:16 AM
+> Last updated: 12/28/2025, 1:14:12 AM

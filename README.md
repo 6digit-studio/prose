@@ -16,19 +16,30 @@ By transforming noisy development logs into refined architectural fragments, Pro
 Prose uses a unique two-stage evolution process to turn ephemeral chat history into consolidated technical wisdom.
 
 ### 1. Vertical Evolution (The Scribe)
-Immediately after a development session, Prose performs **Vertical Evolution**. It transitions from raw, noisy chat logs into structured **Fragments**:
+Immediately after a development session, Prose performs **Vertical Evolution**. It transitions from raw, noisy logs into structured **Fragments**:
 - **⚖️ Decisions**: The "why" behind architectural pivots and design choices.
 - **💡 Insights**: Hard-won learnings, library "gotchas," and contextual patterns.
 - **📖 Narrative**: The human story of the development arc—beats, breakthroughs, and quotes.
-- **🎯 Focus**: The ephemeral state of current goals and active blockers.
-
-*Every vertical pass is a forward move: It looks at the previous state and "evolves" it with the latest session data.*
 
 ### 2. Horizontal Evolution (The Sage)
 As you move across sessions, Prose performs **Horizontal Evolution**. It synthesizes months of work into a sharp, high-density baseline:
 - **Noise Reduction**: Old, stale data ages out naturally.
 - **Conflict Resolution**: Reconciles conflicting insights from different sessions.
 - **Global Context**: Integrates architectural constraints from **Linked Projects**.
+
+---
+
+## ⚡ Sidecar Evolution Architecture
+
+Prose is designed as a **Sidecar Evolution** engine. It doesn't interfere with your main development flow, but runs alongside it. 
+
+Because it operates on snapshots and logs, it is perfectly suited for **fast, low-latency, and hyper-cheap models** like **Gemini 3 Flash**. This allows Prose to perform deep, multi-pass synthesis for pennies, making "infinite" project memory commercially viable.
+
+### 🔌 Multi-Source Agnostic
+Prose isn't just for Claude Code. It already features deep integration with:
+- **Claude Code**: Native session log parsing.
+- **Antigravity**: Intelligent artifact and plan discovery.
+- **Extensible**: We are committed to adding more sources (PRs welcome!) to feed the evolution loop.
 
 ---
 
@@ -48,6 +59,13 @@ Powered by **Jina Embeddings v4**, search queries your history using a sophistic
 
 ### 🎨 Intelligent Design
 Prose is "Human-in-the-Loop." You can steer the consciousness directly by dedicating a session to "Manual Correction." The evolution engine treats these human-authored sessions as absolute ground truth.
+
+---
+
+## 🐶 Dogfooding in Action
+
+We use Prose to build Prose. 
+Check out our [**CLAUDE.md**](CLAUDE.md) for a live example of an evolved Project Consciousness, distilled from the sessions that created this tool.
 
 ---
 
