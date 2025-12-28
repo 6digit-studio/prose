@@ -5,7 +5,7 @@
   "author": "6digit-studio",
   "repository": {
     "type": "git",
-    "url": "https://github.com/6digit-studio/prose.git"
+    "url": "git+https://github.com/6digit-studio/prose.git"
   },
   "homepage": "https://github.com/6digit-studio/prose",
   "type": "module",
@@ -49,5 +49,8 @@
   },
   "engines": {
     "node": ">=20.0.0"
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }
