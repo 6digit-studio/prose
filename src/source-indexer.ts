@@ -15,6 +15,10 @@ import { createHash } from 'crypto';
 import { getJinaEmbeddings } from './jina.js';
 import * as logger from './logger.js';
 
+// Jina's token limit is 8192, ~4 chars per token = ~32KB
+// We use 24KB to leave room for the FILE/TYPE/CODE prefix
+const MAX_CHUNK_CHARS = 24000;
+
 export interface SourceChunk {
     filePath: string;
     content: string;
@@ -42,13 +46,18 @@ export interface SourceManifest {
  */
 export function getProjectFiles(dir: string, extensions: string[] = ['.ts', '.js', '.py', '.go']): string[] {
     try {
-        const extFilter = extensions.map(e => `*${e}`).join(' ');
+        // Quote each glob pattern to prevent shell expansion - let git handle the globs
+        const extFilter = extensions.map(e => `'*${e}'`).join(' ');
+        const cmd = `git -C "${dir}" ls-files --cached --others --exclude-standard ${extFilter}`;
+        logger.verbose(`Running: ${cmd}`);
         // --cached: tracked files, --others --exclude-standard: untracked non-ignored files
-        const output = execSync(`git -C "${dir}" ls-files --cached --others --exclude-standard ${extFilter}`, { encoding: 'utf-8' });
-        return output.split('\n').filter(Boolean).map(f => join(dir, f));
-    } catch (error) {
+        const output = execSync(cmd, { encoding: 'utf-8' });
+        const files = output.split('\n').filter(Boolean).map(f => join(dir, f));
+        logger.verbose(`git ls-files returned ${files.length} files`);
+        return files;
+    } catch (error: any) {
         // Fallback if not a git repo (simple but less robust)
-        logger.warn('Not a git repository or git failed, source indexing might include ignored files.');
+        logger.warn(`Not a git repository or git failed: ${error.message}`);
         return [];
     }
 }
@@ -221,17 +230,26 @@ export async function indexProjectSource(projectName: string, dir: string, apiKe
     if (chunksToEmbed.length > 0) {
         logger.info(`🧬 Embedding ${chunksToEmbed.length} new code chunks for ${projectName}...`);
 
-        const batchSize = 16;
-        for (let i = 0; i < chunksToEmbed.length; i += batchSize) {
-            const batch = chunksToEmbed.slice(i, i + batchSize);
-            const batchVectors = await getJinaEmbeddings(
-                batch.map(c => `FILE: ${relative(dir, c.filePath)}\nTYPE: ${c.type}\nCODE:\n${c.content}`),
-                apiKey,
-                { task: 'retrieval.passage' }
-            );
+        // Process chunks one at a time to handle truncation per-chunk
+        // (batching can cause issues if combined content exceeds limits)
+        for (const chunk of chunksToEmbed) {
+            const relativePath = relative(dir, chunk.filePath);
+            let content = chunk.content;
 
-            for (let j = 0; j < batch.length; j++) {
-                vectorMap.set(batch[j].hash, batchVectors[j]);
+            // Truncate oversized chunks to stay under Jina's token limit
+            if (content.length > MAX_CHUNK_CHARS) {
+                logger.verbose(`✂️  Truncating ${relativePath} chunk (${content.length} -> ${MAX_CHUNK_CHARS} chars)`);
+                content = content.slice(0, MAX_CHUNK_CHARS) + '\n// ... truncated for embedding';
+            }
+
+            const textToEmbed = `FILE: ${relativePath}\nTYPE: ${chunk.type}\nCODE:\n${content}`;
+
+            try {
+                const [vector] = await getJinaEmbeddings([textToEmbed], apiKey, { task: 'retrieval.passage' });
+                vectorMap.set(chunk.hash, vector);
+            } catch (error: any) {
+                logger.warn(`⚠️  Failed to embed ${relativePath}: ${error.message}`);
+                // Continue with other chunks
             }
         }
     }

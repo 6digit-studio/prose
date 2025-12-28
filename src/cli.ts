@@ -970,7 +970,7 @@ program
   .description('Semantic search through evolved memory')
   .option('-p, --project <name>', 'Filter to specific project (auto-detects from cwd if not specified)')
   .option('-a, --all', 'Search all projects (ignore cwd auto-detection)')
-  .option('-t, --type <types>', 'Filter by type: decision,insight,gotcha,narrative,quote', 'decision,insight,gotcha')
+  .option('-t, --type <types>', 'Filter by type: decision,insight,gotcha,narrative,quote,source', 'decision,insight,gotcha,source')
   .option('-l, --limit <n>', 'Limit results', '10')
   .option('--json', 'Output as JSON')
   .action(async (query, options) => {

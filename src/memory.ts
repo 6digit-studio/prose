@@ -16,6 +16,7 @@ import { createHash } from 'crypto';
 import type { SourceLink, Message, Conversation } from './session-parser.js';
 import type { AllFragments, DecisionFragment, InsightFragment, NarrativeFragment, VocabularyFragment } from './schemas.js';
 import { emptyFragments } from './schemas.js';
+import * as logger from './logger.js';
 
 // ============================================================================
 // Types
@@ -606,8 +607,8 @@ export async function searchMemory(query: string, options?: {
       if (embeddings.length > 0) {
         queryVector = embeddings[0];
       }
-    } catch (e) {
-      console.error('Semantic search failed, falling back to keywords:', e);
+    } catch (e: any) {
+      logger.warn(`Semantic search failed, falling back to keywords: ${e.message}`);
     }
   }
 
@@ -635,12 +636,11 @@ export async function searchMemory(query: string, options?: {
     }
 
     const memory = loadProjectMemory(projectName);
-    if (!memory?.sessionSnapshots) continue;
-
-    const vectors = loadProjectVectors(projectName);
+    const hasSnapshots = (memory?.sessionSnapshots?.length ?? 0) > 0;
+    const vectors = hasSnapshots ? loadProjectVectors(projectName) : {};
 
     // Search through sessionSnapshots for temporal awareness
-    for (const snapshot of memory.sessionSnapshots) {
+    for (const snapshot of memory?.sessionSnapshots || []) {
       const timestamp = new Date(snapshot.timestamp);
       const recencyBonus = ((timestamp.getTime() - oldestTime) / timeRange) * 20; // 0-20 bonus for recency
 
@@ -700,7 +700,7 @@ export async function searchMemory(query: string, options?: {
       }
     }
 
-    // --- NEW: Search source code chunks ---
+    // --- Search source code chunks ---
     if (!typeFilter || typeFilter.includes('source')) {
       const sourceManifest = loadSourceManifest(projectName);
       const sourceVectorData = loadSourceVectors(projectName) as any;
