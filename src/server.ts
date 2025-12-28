@@ -101,7 +101,7 @@ app.get('/api/search', async (req, res) => {
     return res.status(400).json({ error: 'Query required' });
   }
 
-  const jinaApiKey = process.env.PROSE_JINA_API_KEY || process.env.PROSE_API_KEY || process.env.LLM_API_KEY || process.env.OPENROUTER_API_KEY || process.env.OPENAI_API_KEY;
+  const jinaApiKey = process.env.PROSE_JINA_API_KEY;
 
   const results = await searchMemory(query, {
     projects: project ? [project] : undefined,

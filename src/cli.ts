@@ -12,8 +12,9 @@
 // Load .env file if present (check multiple locations)
 import { config } from 'dotenv';
 import { homedir } from 'os';
-import { join, basename } from 'path';
-import { existsSync, mkdirSync, writeFileSync, readdirSync } from 'fs';
+import { join, basename, dirname } from 'path';
+import { existsSync, mkdirSync, writeFileSync, readdirSync, appendFileSync, symlinkSync, readFileSync } from 'fs';
+import { execSync } from 'child_process';
 config({ quiet: true });  // Load from current directory
 config({ path: join(homedir(), '.config', 'prose', '.env'), quiet: true });  // Global config
 
@@ -194,7 +195,44 @@ program
     logger.info(`🧠 Initializing prose for: ${projectName}\n`);
     ensureTemplate(cwd);
 
-    // Create .claude/commands directory
+    // 1. .gitignore protection
+    const gitignorePath = join(cwd, '.gitignore');
+    const ignoreEntry = '.claude/prose/';
+    if (existsSync(gitignorePath)) {
+      const gitignoreContent = readFileSync(gitignorePath, 'utf-8');
+      if (!gitignoreContent.includes(ignoreEntry)) {
+        appendFileSync(gitignorePath, `\n# Prose session mirrors\n${ignoreEntry}\n`);
+        logger.info(`🛡️  Added ${ignoreEntry} to .gitignore`);
+      }
+    } else if (isGitRepo(cwd)) {
+      writeFileSync(gitignorePath, `# Prose session mirrors\n${ignoreEntry}\n`);
+      logger.info(`🛡️  Created .gitignore with ${ignoreEntry}`);
+    }
+
+    // 2. Create local mirror symlink (optional but helpful for agents)
+    const localMirrorDir = join(cwd, '.claude', 'prose');
+    if (!existsSync(localMirrorDir)) {
+      mkdirSync(localMirrorDir, { recursive: true });
+    }
+
+    const vaultDir = getMemoryDir();
+    const vaultMirrorPath = join(vaultDir, 'mirrors', projectName);
+    const localSymlinkPath = join(localMirrorDir, 'mirrors');
+
+    if (!existsSync(localSymlinkPath)) {
+      try {
+        // Ensure vault project mirror dir exists
+        if (!existsSync(vaultMirrorPath)) {
+          mkdirSync(vaultMirrorPath, { recursive: true });
+        }
+        symlinkSync(vaultMirrorPath, localSymlinkPath, 'dir');
+        logger.info(`🔗 Linked .claude/prose/mirrors -> Vault`);
+      } catch (e) {
+        // Fallback for systems where symlinks fail or permissions are tight
+      }
+    }
+
+    // 3. Create .claude/commands directory
     const commandsDir = '.claude/commands';
     if (!existsSync(commandsDir)) {
       mkdirSync(commandsDir, { recursive: true });
@@ -209,14 +247,13 @@ program
 
 \`\`\`bash
 # Process recent sessions and update memory
-# Process recent sessions and update memory
 prose evolve
 
 # Install PreCompact hook (auto-evolve on /compact)
 prose init hooks
 
 # View memory in browser
-prose web --open
+prose serve
 
 # Search memory
 prose search "why did we decide..."
@@ -264,6 +301,7 @@ program
   .option('--no-artifacts', 'Disable per-session artifact export')
   .action(async (options) => {
     const apiKey = options.apiKey || process.env.PROSE_API_KEY || process.env.LLM_API_KEY || process.env.OPENROUTER_API_KEY || process.env.OPENAI_API_KEY;
+    const jinaApiKey = process.env.PROSE_JINA_API_KEY;
     if (!apiKey) {
       logger.error('No API key found. Set PROSE_API_KEY, LLM_API_KEY, or OPENROUTER_API_KEY in .env or use --api-key');
       process.exit(1);
@@ -477,6 +515,17 @@ program
       // Update artifacts if requested
       if (options.artifacts && !['git', 'antigravity', 'design'].includes(session.sourceType as string)) {
         const fullConversation = parseSessionFile(session.path);
+
+        // Security check: If writing to repo, ensure it's ignored
+        if (isGitRepo(process.cwd())) {
+          try {
+            execSync('git check-ignore -q .claude/prose/', { stdio: 'ignore' });
+          } catch (e) {
+            console.log('⚠️  SECURITY WARNING: .claude/prose/ is not gitignored. Sessions may be committed accidentally.');
+            console.log('   Run: prose init  (to fix .gitignore automatically)');
+          }
+        }
+
         writeVerbatimSessionArtifact(fullConversation);
       }
 
@@ -501,8 +550,6 @@ program
         if (options.verbose) {
           console.log(`   🔄 Window ${i + 1}/${windows.length} (${window.length} messages)`);
         }
-
-        const jinaApiKey = process.env.PROSE_JINA_API_KEY || process.env.PROSE_API_KEY;
 
         const result = await evolveAllFragments(
           currentFragments,
@@ -940,7 +987,7 @@ program
       }
     }
 
-    const jinaApiKey = process.env.PROSE_JINA_API_KEY || process.env.PROSE_API_KEY || process.env.OPENROUTER_API_KEY;
+    const jinaApiKey = process.env.PROSE_JINA_API_KEY;
 
     const results = await searchMemory(query, {
       projects: projectFilter,
@@ -1410,8 +1457,25 @@ vault
       const memoryDir = getMemoryDir();
 
       logger.info('🔄 Syncing vault...');
-      execSync(`git -C "${memoryDir}" pull --rebase origin main || git -C "${memoryDir}" pull --rebase origin master`, { stdio: 'inherit' });
-      execSync(`git -C "${memoryDir}" push origin main || git -C "${memoryDir}" push origin master`, { stdio: 'inherit' });
+
+      // 1. Detect current branch
+      const currentBranch = execSync(`git -C "${memoryDir}" rev-parse --abbrev-ref HEAD`, { encoding: 'utf-8' }).trim();
+
+      // 2. Check if remote has this branch
+      const remoteRefs = execSync(`git -C "${memoryDir}" ls-remote origin ${currentBranch}`, { encoding: 'utf-8' }).trim();
+
+      if (remoteRefs) {
+        // Branch exists on remote, try to pull
+        logger.trace(`Pulling ${currentBranch} from origin...`);
+        execSync(`git -C "${memoryDir}" pull --rebase origin ${currentBranch}`, { stdio: 'inherit' });
+      } else {
+        logger.info(`✨ First sync for branch "${currentBranch}" - skipping pull.`);
+      }
+
+      // 3. Push current branch
+      logger.trace(`Pushing ${currentBranch} to origin...`);
+      execSync(`git -C "${memoryDir}" push origin ${currentBranch}`, { stdio: 'inherit' });
+
       logger.info('✅ Vault synchronized.');
     } catch (error: any) {
       logger.error(`⚠️  Sync failed: ${error.message}`);
@@ -1429,9 +1493,9 @@ indexCmd
   .description('Generate missing embeddings for all existing project fragments')
   .option('-p, --project <name>', 'Filter to specific project')
   .action(async (options) => {
-    const apiKey = process.env.PROSE_JINA_API_KEY || process.env.PROSE_API_KEY || process.env.OPENROUTER_API_KEY;
+    const apiKey = process.env.PROSE_JINA_API_KEY;
     if (!apiKey) {
-      logger.error('No Jina API key found. Set PROSE_JINA_API_KEY or PROSE_API_KEY');
+      logger.error('No Jina API key found. Set PROSE_JINA_API_KEY as an environment variable.');
       process.exit(1);
     }
 

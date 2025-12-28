@@ -8,9 +8,12 @@ Welcome to the technical guide for **Prose**, the semantic memory layer for AI d
 Prose is backend-agnostic. It uses the [Vercel AI SDK](https://sdk.vercel.ai/) to support multiple providers.
 
 Configure your environment variables:
-- `PROSE_API_KEY`: The primary key used for LLM inference (defaulting to OpenRouter) and Jina Semantic Retrieval.
-- `PROSE_JINA_API_KEY`: (Optional) If you want to use a separate key for Jina embeddings.
-- `LLM_BASE_URL`: (Optional) Set this to use other OpenAI-compatible providers (e.g., Local LLMs, Anthropic-via-Proxy).
+- `PROSE_API_KEY`: **(Required)** Primary key for LLM reasoning and evolution.
+- `PROSE_JINA_API_KEY`: **(Required)** Dedicated key for semantic embeddings and retrieval.
+- `LLM_BASE_URL`: (Optional) Set for OpenAI-compatible proxies/providers.
+
+> [!IMPORTANT]
+> Prose no longer falls back to `PROSE_API_KEY` for Jina services. You MUST provide `PROSE_JINA_API_KEY` for semantic search features to work.
 
 ### Installation
 ```bash
@@ -19,9 +22,12 @@ npm install -g @6digit-studio/prose
 
 ---
 
-## 🏛️ Personal Memory Vault
-
 The **Vault** is a central, Git-backed repository (stored at `~/.prose`) that version-controls your semantic history across all your projects.
+
+### 🛡️ Secure Mirroring
+By default, verbatim session history is stored in the Vault at `~/.prose/mirrors/[project]/`. 
+- **Redaction**: All stored sessions are automatically scrubbed of API keys and common secrets.
+- **Gitignore**: Running `prose init` adds `.claude/prose/` to your `.gitignore` and creates a local symlink to the vault-locked mirrors.
 
 ### Initialization
 To start versioning your "global brain":

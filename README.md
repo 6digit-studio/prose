@@ -60,6 +60,12 @@ Powered by **Jina Embeddings v4**, search queries your history using a sophistic
 ### 🎨 Intelligent Design
 Prose is "Human-in-the-Loop." You can steer the consciousness directly by dedicating a session to "Manual Correction." The evolution engine treats these human-authored sessions as absolute ground truth.
 
+### 🛡️ Security by Design
+Prose takes your security seriously:
+- **Centralized Vault**: Verbatim session mirrors live in `~/.prose/mirrors/`, kept out of your project repositories by default.
+- **Redaction**: Common secrets (API keys, tokens) are automatically scrubbed from session records before storage.
+- **Gitignore Safety**: `prose init` automatically protects your local project from accidental session leakage.
+
 ---
 
 ## 🛠️ CLI-First & Agent-Native
@@ -86,9 +92,14 @@ npm install -g @6digit-studio/prose
 ```
 
 ### 2. Configure
-Set your universal API key ([OpenRouter](https://openrouter.ai/) is the recommended provider):
+Set your API keys. Prose decouples project reasoning from semantic search to prevent service interference.
+
 ```bash
-export PROSE_API_KEY="your-key-here"
+# Required: For project reasoning & evolution
+export PROSE_API_KEY="your-llm-key"
+
+# Required: For semantic search & memory recall
+export PROSE_JINA_API_KEY="your-jina-key"
 ```
 
 ### 3. Initialize & Evolve

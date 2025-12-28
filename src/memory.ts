@@ -757,6 +757,39 @@ export function generateContextMarkdown(projectName: string): string | null {
 }
 
 /**
+ * Redact sensitive information like API keys and tokens from a string
+ */
+export function redactSecrets(text: string): string {
+  if (!text) return text;
+
+  // Patterns for common secrets
+  const patterns = [
+    // OpenAI, Anthropic, OpenRouter, etc.
+    /(sk-[a-zA-Z0-9]{20,})/g,
+    /(g-sk-[a-zA-Z0-9]{20,})/g,
+    /(x-pk-[a-zA-Z0-9]{20,})/g,
+    // Generic tokens/keys in assignments/headers
+    /(?:key|token|password|secret|auth|api-key|apikey)["']?\s*[:=]\s*["']?([a-zA-Z0-9\-_]{16,})["']?/ig,
+    // Authorization headers
+    /(?:Authorization:\s*(?:Bearer|Basic)\s+)([a-zA-Z0-9\.\-_]{16,})/ig
+  ];
+
+  let redacted = text;
+  for (const pattern of patterns) {
+    redacted = redacted.replace(pattern, (match, secret) => {
+      // If there's a capturing group (secret), replace only that
+      if (secret) {
+        return match.replace(secret, '[REDACTED]');
+      }
+      // Otherwise replace the whole match (for simple patterns)
+      return '[REDACTED]';
+    });
+  }
+
+  return redacted;
+}
+
+/**
  * Generate a verbatim Markdown record of a session
  */
 export function generateVerbatimMarkdown(conversation: Conversation): string {
@@ -798,18 +831,28 @@ export function generateVerbatimMarkdown(conversation: Conversation): string {
 }
 
 /**
- * Write a verbatim session artifact to the prose directory
+ * Write a verbatim session artifact to the Vault (default) or specified directory
  */
 export function writeVerbatimSessionArtifact(conversation: Conversation, outputDir?: string): string {
-  const dir = outputDir || join(process.cwd(), '.claude', 'prose');
+  // Default to vault mirrors: ~/.prose/mirrors/[project]/
+  let dir = outputDir;
+  if (!dir) {
+    const vaultDir = getMemoryDir();
+    const projectName = conversation.project;
+    dir = join(vaultDir, 'mirrors', projectName);
+  }
+
   if (!existsSync(dir)) {
     mkdirSync(dir, { recursive: true });
   }
 
   const filename = `session-${conversation.sessionId.slice(0, 8)}.md`;
   const outputPath = join(dir, filename);
-  const markdown = generateVerbatimMarkdown(conversation);
-  writeFileSync(outputPath, markdown);
+
+  const rawMarkdown = generateVerbatimMarkdown(conversation);
+  const redactedMarkdown = redactSecrets(rawMarkdown);
+
+  writeFileSync(outputPath, redactedMarkdown);
 
   return outputPath;
 }
