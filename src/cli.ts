@@ -45,6 +45,8 @@ import {
   loadProjectVectors,
   saveProjectVectors,
   calculateFragmentHash,
+  getGlobalConfig,
+  saveGlobalConfig,
 } from './memory.js';
 import { getJinaEmbeddings, cosineSimilarity } from './jina.js';
 import { evolveHorizontal } from './horizontal.js';
@@ -300,12 +302,16 @@ program
   .option('--artifacts', 'Export per-session Markdown artifacts', true)
   .option('--no-artifacts', 'Disable per-session artifact export')
   .action(async (options) => {
+    const config = getGlobalConfig();
     const apiKey = options.apiKey || process.env.PROSE_API_KEY || process.env.LLM_API_KEY || process.env.OPENROUTER_API_KEY || process.env.OPENAI_API_KEY;
     const jinaApiKey = process.env.PROSE_JINA_API_KEY;
     if (!apiKey) {
-      logger.error('No API key found. Set PROSE_API_KEY, LLM_API_KEY, or OPENROUTER_API_KEY in .env or use --api-key');
+      logger.error('No LLM API key found. Set PROSE_API_KEY, LLM_API_KEY, or OPENROUTER_API_KEY in .env or use --api-key');
       process.exit(1);
     }
+
+    // Resolve artifacts preference (Option > Global Config)
+    const shouldMirror = options.artifacts !== undefined ? options.artifacts : config.artifacts;
 
     logger.info('🧬 Prose - Evolving semantic memory');
     logger.warn('⚠️  ALPHA / EXPERIMENTAL: This tool is largely untested. Use at your own risk.');
@@ -513,11 +519,11 @@ program
       }
 
       // Update artifacts if requested
-      if (options.artifacts && !['git', 'antigravity', 'design'].includes(session.sourceType as string)) {
+      if (shouldMirror && !['git', 'antigravity', 'design'].includes(session.sourceType as string)) {
         const fullConversation = parseSessionFile(session.path);
 
         // Security check: If writing to repo, ensure it's ignored
-        if (isGitRepo(process.cwd())) {
+        if (config.mirrorMode === 'local' && isGitRepo(process.cwd())) {
           try {
             execSync('git check-ignore -q .claude/prose/', { stdio: 'ignore' });
           } catch (e) {
@@ -526,7 +532,8 @@ program
           }
         }
 
-        writeVerbatimSessionArtifact(fullConversation);
+        const outputDir = config.mirrorMode === 'local' ? join(process.cwd(), '.claude', 'prose') : undefined;
+        writeVerbatimSessionArtifact(fullConversation, outputDir);
       }
 
       // Window size for evolution - Gemini Flash has a huge context, we can process 2000 messages at once
@@ -1354,6 +1361,7 @@ program
   .command('artifacts')
   .description('Export all session fragments as Markdown artifacts')
   .option('-p, --project <path>', 'Project name or path')
+  .option('--local', 'Export to local .claude/prose directory instead of Vault')
   .action(async (options) => {
     let projectName = options.project;
     if (!projectName) {
@@ -1364,8 +1372,15 @@ program
       }
     }
 
-    logger.info(`📦 Exporting verbatim artifacts for ${projectName}...`);
-    const artifactsDir = join(process.cwd(), '.claude', 'prose');
+    const config = getGlobalConfig();
+    const mirrorMode = options.local ? 'local' : config.mirrorMode;
+
+    logger.info(`📦 Exporting verbatim artifacts for ${projectName} (Mode: ${mirrorMode})...`);
+
+    const artifactsDir = mirrorMode === 'local'
+      ? join(process.cwd(), '.claude', 'prose')
+      : undefined; // Defaults to vault in writeVerbatimSessionArtifact
+
     const sessions = discoverSessionFiles(projectName);
     let count = 0;
     for (const session of sessions) {
@@ -1373,7 +1388,48 @@ program
       writeVerbatimSessionArtifact(conv, artifactsDir);
       count++;
     }
-    logger.success(`Exported ${count} verbatim artifacts to ${artifactsDir}`);
+
+    const targetPath = artifactsDir || join(getMemoryDir(), 'mirrors', projectName);
+    logger.success(`Exported ${count} verbatim artifacts to ${targetPath}`);
+  });
+
+// ============================================================================
+// config - Manage global configuration
+// ============================================================================
+
+const configCmd = program.command('config').description('Manage global configuration settings');
+
+configCmd
+  .command('set <key> <value>')
+  .description('Set a global configuration value')
+  .action((key, value) => {
+    const config = getGlobalConfig();
+
+    if (key === 'artifacts') {
+      saveGlobalConfig({ artifacts: value === 'true' });
+      logger.success(`Set global artifacts to: ${value === 'true'}`);
+    } else if (key === 'mirror-mode') {
+      if (value !== 'vault' && value !== 'local') {
+        logger.error('mirror-mode must be "vault" or "local"');
+        process.exit(1);
+      }
+      saveGlobalConfig({ mirrorMode: value as any });
+      logger.success(`Set global mirror-mode to: ${value}`);
+    } else {
+      logger.error(`Unknown configuration key: ${key}`);
+      process.exit(1);
+    }
+  });
+
+configCmd
+  .command('show')
+  .description('Show current global configuration')
+  .action(() => {
+    const config = getGlobalConfig();
+    logger.info('📊 Prose - Global Configuration\n');
+    console.log(`   artifacts: ${config.artifacts}`);
+    console.log(`   mirror-mode: ${config.mirrorMode}`);
+    console.log(`\n📂 Vault location: ${getMemoryDir()}`);
   });
 
 // ============================================================================

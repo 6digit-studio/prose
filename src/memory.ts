@@ -43,6 +43,15 @@ export interface MemoryIndex {
   globalVocabulary: VocabularyFragment | null;
   /** Cursor: timestamp of oldest unprocessed session */
   processingCursor?: Date;
+  /** Global configuration settings */
+  config?: GlobalConfig;
+}
+
+export interface GlobalConfig {
+  /** Should verbatim artifacts be generated? */
+  artifacts?: boolean;
+  /** Where should artifacts be stored? 'vault' or 'local' */
+  mirrorMode?: 'vault' | 'local';
 }
 
 export interface SessionProcessingState {
@@ -223,6 +232,30 @@ export function loadMemoryIndex(): MemoryIndex {
       globalVocabulary: null,
     };
   }
+}
+
+/**
+ * Get effective global configuration (Env > Saved Config > Defaults)
+ */
+export function getGlobalConfig(): GlobalConfig {
+  const index = loadMemoryIndex();
+  const saved = index.config || {};
+
+  return {
+    artifacts: process.env.PROSE_ARTIFACTS !== undefined
+      ? process.env.PROSE_ARTIFACTS === 'true'
+      : (saved.artifacts !== undefined ? saved.artifacts : true),
+    mirrorMode: (process.env.PROSE_MIRROR_MODE as any) || saved.mirrorMode || 'vault'
+  };
+}
+
+/**
+ * Save global configuration settings
+ */
+export function saveGlobalConfig(config: GlobalConfig): void {
+  const index = loadMemoryIndex();
+  index.config = { ...index.config, ...config };
+  saveMemoryIndex(index);
 }
 
 /**
