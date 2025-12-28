@@ -57,6 +57,13 @@ Powered by **Jina Embeddings v4**, search queries your history using a sophistic
 - **Recency**: Prioritizes the latest contexts so your trajectory stays sharp.
 - **Keyword**: Exact term matching for technical precision.
 
+### 💻 Source-Aware Intelligence
+Prose doesn't just remember what you said; it understands what you **built**:
+- **Semantic Source Indexing**: Use `prose index source` to vectorize your actual codebase.
+- **Code-Aware Chunking**: Chunks are generated based on function/class boundaries for higher-precision retrieval.
+- **Dedicated Storage**: Implementation vectors live in `.source-vectors.json`, keeping your architectural memory clean.
+- **Staleness Detection**: Uses Git HEAD tracking and content hashing to ensure you only spend tokens when code actually changes.
+
 ### 🎨 Intelligent Design
 Prose is "Human-in-the-Loop." You can steer the consciousness directly by dedicating a session to "Manual Correction." The evolution engine treats these human-authored sessions as absolute ground truth.
 
@@ -107,6 +114,17 @@ Start your project's consciousness:
 ```bash
 prose init
 prose evolve
+prose index source # NEW: Vectorize your codebase
+```
+
+### 4. Search Implementation
+Find the "Why" (decisions) or the "How" (code) semantically:
+```bash
+# Search decisions and insights
+prose search "why did we switch to gemini?"
+
+# Search actual code implementations
+prose search "how do we handle secret redaction?" --source
 ```
 
 ---

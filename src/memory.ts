@@ -185,6 +185,16 @@ export function calculateFragmentHash(type: string, content: string, context?: s
   return createHash('sha256').update(data).digest('hex');
 }
 
+export function getSourceManifestPath(projectName: string): string {
+  const sanitized = projectName.replace(/[^a-zA-Z0-9-_]/g, '_');
+  return join(getMemoryDir(), 'projects', `${sanitized}.source.json`);
+}
+
+export function getSourceVectorPath(projectName: string): string {
+  const sanitized = projectName.replace(/[^a-zA-Z0-9-_]/g, '_');
+  return join(getMemoryDir(), 'projects', `${sanitized}.source-vectors.json`);
+}
+
 // ============================================================================
 // Loading & Saving
 // ============================================================================
@@ -256,6 +266,36 @@ export function saveGlobalConfig(config: GlobalConfig): void {
   const index = loadMemoryIndex();
   index.config = { ...index.config, ...config };
   saveMemoryIndex(index);
+}
+
+export function loadSourceManifest(projectName: string): any | null {
+  const path = getSourceManifestPath(projectName);
+  if (!existsSync(path)) return null;
+  try {
+    return JSON.parse(readFileSync(path, 'utf-8'));
+  } catch {
+    return null;
+  }
+}
+
+export function saveSourceManifest(manifest: any): void {
+  const path = getSourceManifestPath(manifest.project);
+  writeFileSync(path, JSON.stringify(manifest, null, 2));
+}
+
+export function loadSourceVectors(projectName: string): number[][] {
+  const path = getSourceVectorPath(projectName);
+  if (!existsSync(path)) return [];
+  try {
+    return JSON.parse(readFileSync(path, 'utf-8'));
+  } catch {
+    return [];
+  }
+}
+
+export function saveSourceVectors(projectName: string, vectors: number[][]): void {
+  const path = getSourceVectorPath(projectName);
+  writeFileSync(path, JSON.stringify(vectors));
 }
 
 /**
@@ -528,12 +568,13 @@ export function isSessionProcessed(memory: ProjectMemory | null, sessionId: stri
 
 export interface SearchResult {
   project: string;
-  type: 'decision' | 'insight' | 'gotcha' | 'narrative' | 'quote';
+  type: 'decision' | 'insight' | 'gotcha' | 'narrative' | 'quote' | 'source';
   content: string;
   context?: string;
   score: number;
   timestamp?: Date;
   sourceLink?: SourceLink;
+  filePath?: string; // For source chunks
 }
 
 /**
@@ -656,6 +697,52 @@ export async function searchMemory(query: string, options?: {
       // Search quotes
       if (!typeFilter || typeFilter.includes('quote')) {
         searchFragments('quote', snapshot.fragments.narrative?.memorable_quotes || [], q => q.quote, q => q.speaker);
+      }
+    }
+
+    // --- NEW: Search source code chunks ---
+    if (!typeFilter || typeFilter.includes('source')) {
+      const sourceManifest = loadSourceManifest(projectName);
+      const sourceVectorData = loadSourceVectors(projectName) as any;
+
+      if (sourceManifest && sourceVectorData && sourceVectorData.vectors) {
+        // Build hash-to-index map for source vectors
+        const hashToVectorIndex = new Map<string, number>();
+        for (let i = 0; i < sourceVectorData.hashes.length; i++) {
+          hashToVectorIndex.set(sourceVectorData.hashes[i], i);
+        }
+
+        for (const [relativePath, fileMeta] of Object.entries(sourceManifest.files as Record<string, any>)) {
+          for (const chunk of fileMeta.chunks) {
+            const hash = chunk.hash;
+            if (seen.has(hash)) continue;
+
+            let score = 0;
+            const keywordScore = scoreMatch(queryTerms, `${relativePath} ${chunk.type} ${chunk.content || ''}`);
+
+            // Vector Score
+            const vectorIndex = hashToVectorIndex.get(hash);
+            if (queryVector && vectorIndex !== undefined) {
+              const similarity = cosineSimilarity(queryVector, sourceVectorData.vectors[vectorIndex]);
+              score += similarity * 100;
+            }
+
+            // Keyword Score
+            score += keywordScore * 10;
+
+            if (score > 40 || keywordScore > 20) { // Slightly higher threshold for source to avoid noise
+              seen.add(hash);
+              results.push({
+                project: projectName,
+                type: 'source',
+                content: `Chunk in ${relativePath} (${chunk.type}, L${chunk.startLine}-${chunk.endLine})`,
+                context: relativePath,
+                score: score, // No recency bonus for source for now, or maybe use lastIndexed?
+                filePath: relativePath,
+              });
+            }
+          }
+        }
       }
     }
   }

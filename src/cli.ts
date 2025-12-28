@@ -51,6 +51,7 @@ import {
 import { getJinaEmbeddings, cosineSimilarity } from './jina.js';
 import { evolveHorizontal } from './horizontal.js';
 import { generateWebsite } from './web.js';
+import { indexProjectSource } from './source-indexer.js';
 import { getGitCommits, isGitRepo, getAntigravityBrains, getAntigravityArtifacts, parseAntigravityArtifact, matchBrainToProject, getLatestGitCommitDate, getDesignSessions, parseDesignSession } from './source-parsers.js';
 import { startServer } from './server.js';
 import { injectMemory, ensureTemplate } from './injector.js';
@@ -1023,6 +1024,7 @@ program
         gotcha: '⚠️ ',
         narrative: '📖',
         quote: '💬',
+        source: '💻', // NEW: Source code icon
       }[result.type];
 
       const project = formatProjectName(result.project);
@@ -1614,6 +1616,36 @@ indexCmd
       } catch (error: any) {
         logger.error(`❌ Failed to backfill ${projectName}: ${error.message}`);
       }
+    }
+  });
+
+indexCmd
+  .command('source')
+  .description('Index project source code for semantic implementation search')
+  .option('-p, --project <name>', 'Project name or path')
+  .action(async (options) => {
+    let projectName = options.project;
+    if (!projectName) {
+      projectName = detectProjectFromCwd();
+      if (!projectName) {
+        logger.error('Could not detect project from current directory');
+        process.exit(1);
+      }
+    }
+
+    const apiKey = process.env.PROSE_JINA_API_KEY;
+    if (!apiKey) {
+      logger.error('No Jina API key found. Set PROSE_JINA_API_KEY as an environment variable.');
+      process.exit(1);
+    }
+
+    try {
+      const stats = await indexProjectSource(projectName, process.cwd(), apiKey);
+      logger.success(`✅ ${projectName} source indexing complete.`);
+      logger.info(`   Files indexed: ${stats.filesIndexed}`);
+      logger.info(`   Chunks created: ${stats.chunksCreated}`);
+    } catch (error: any) {
+      logger.error(`❌ Failed to index source: ${error.message}`);
     }
   });
 
