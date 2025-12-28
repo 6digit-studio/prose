@@ -62,6 +62,15 @@ Prose is "Human-in-the-Loop." You can steer the consciousness directly by dedica
 
 ---
 
+## 🛠️ CLI-First & Agent-Native
+
+Prose is built on a "No-MCP" philosophy. There's no need to configure complex Model Context Protocols or middle-ware.
+
+- **For Agents**: AI models (like Claude) can interact with Prose directly via standard `bash` commands. By injecting instructions into `CLAUDE.md`, your agent becomes self-sufficient—running `prose search` or `prose status` whenever it needs context.
+- **For Humans**: The CLI is designed for ergonomics. It's fast, colorful, and intuitive. Whether you're doing "Digital Archaeology" or just checking the current goal, you have raw power at your fingertips.
+
+---
+
 ## 🐶 Dogfooding in Action
 
 We use Prose to build Prose. 
