@@ -653,18 +653,26 @@ export async function searchMemory(query: string, options?: {
           if (seen.has(hash)) continue;
 
           let score = 0;
-          const keywordScore = scoreMatch(queryTerms, `${content} ${context || ''}`);
+          let hasVector = false;
 
-          // Vector Score
+          // Vector Score (primary - use exclusively if available)
           if (queryVector && vectors[hash]) {
             const similarity = cosineSimilarity(queryVector, vectors[hash]);
-            score += similarity * 100;
+            score = similarity * 100;
+            hasVector = true;
           }
 
-          // Keyword Score
-          score += keywordScore * 10;
+          // Keyword Score (fallback only when no vector)
+          if (!hasVector) {
+            const keywordScore = scoreMatch(queryTerms, `${content} ${context || ''}`);
+            score = keywordScore * 10;
+          }
 
-          if (score > 0 || (keywordScore > 0)) {
+          // Threshold: cosine > 0.6 for vectors, or ALL query terms must match for keywords
+          // scoreMatch gives 15 per term, we multiply by 10, so threshold = terms * 150
+          const minKeywordScore = queryTerms.length * 150;
+          const threshold = hasVector ? 60 : minKeywordScore;
+          if (score >= threshold) {
             seen.add(hash);
             results.push({
               project: projectName,
@@ -718,19 +726,26 @@ export async function searchMemory(query: string, options?: {
             if (seen.has(hash)) continue;
 
             let score = 0;
-            const keywordScore = scoreMatch(queryTerms, `${relativePath} ${chunk.type} ${chunk.content || ''}`);
+            let hasVector = false;
 
-            // Vector Score
+            // Vector Score (primary - use exclusively if available)
             const vectorIndex = hashToVectorIndex.get(hash);
             if (queryVector && vectorIndex !== undefined) {
               const similarity = cosineSimilarity(queryVector, sourceVectorData.vectors[vectorIndex]);
-              score += similarity * 100;
+              score = similarity * 100;
+              hasVector = true;
             }
 
-            // Keyword Score
-            score += keywordScore * 10;
+            // Keyword Score (fallback only when no vector)
+            if (!hasVector) {
+              const keywordScore = scoreMatch(queryTerms, `${relativePath} ${chunk.type} ${chunk.content || ''}`);
+              score = keywordScore * 10;
+            }
 
-            if (score > 40 || keywordScore > 20) { // Slightly higher threshold for source to avoid noise
+            // Threshold: cosine > 0.6 for vectors, or ALL query terms must match for keywords
+            const minKeywordScore = queryTerms.length * 150;
+            const threshold = hasVector ? 60 : minKeywordScore;
+            if (score >= threshold) {
               seen.add(hash);
               results.push({
                 project: projectName,

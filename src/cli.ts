@@ -47,6 +47,7 @@ import {
   calculateFragmentHash,
   getGlobalConfig,
   saveGlobalConfig,
+  loadSourceManifest,
 } from './memory.js';
 import { getJinaEmbeddings, cosineSimilarity } from './jina.js';
 import { evolveHorizontal } from './horizontal.js';
@@ -719,6 +720,41 @@ program
 
     console.log(`   Total tokens: ${totalTokens}`);
     console.log(`   Memory stored: ${getMemoryDir()}`);
+
+    // Auto-index source code if git HEAD has changed
+    if (!options.dryRun && jinaApiKey) {
+      const cwd = process.cwd();
+      const detectedProject = projectFilter || detectProjectFromCwd();
+
+      if (detectedProject && isGitRepo(cwd)) {
+        const { getGitHead, indexProjectSource } = await import('./source-indexer.js');
+        const currentHead = getGitHead(cwd);
+        const manifest = loadSourceManifest(detectedProject);
+
+        if (!manifest || manifest.gitHead !== currentHead) {
+          const changedFiles = manifest?.gitHead
+            ? (() => {
+                try {
+                  const diff = execSync(`git diff --name-only ${manifest.gitHead}..${currentHead} -- '*.ts' '*.js'`, { encoding: 'utf-8', cwd });
+                  return diff.split('\n').filter(Boolean).length;
+                } catch { return '?'; }
+              })()
+            : 'all';
+
+          console.log(`\n🔍 Source index outdated (${changedFiles} files changed), re-indexing...`);
+          try {
+            const stats = await indexProjectSource(detectedProject, cwd, jinaApiKey);
+            console.log(`   ✅ Indexed ${stats.filesIndexed} files, ${stats.chunksCreated} new chunks`);
+          } catch (e: any) {
+            console.log(`   ⚠️  Source indexing failed: ${e.message}`);
+          }
+        } else {
+          if (options.verbose) {
+            console.log(`\n🔍 Source index up to date (HEAD unchanged)`);
+          }
+        }
+      }
+    }
 
     // Always attempt injection at the end for the current project
     if (!options.dryRun) {
@@ -1623,7 +1659,63 @@ indexCmd
   .command('source')
   .description('Index project source code for semantic implementation search')
   .option('-p, --project <name>', 'Project name or path')
+  .option('-a, --all', 'Index all known projects (backfill)')
   .action(async (options) => {
+    const apiKey = process.env.PROSE_JINA_API_KEY;
+    if (!apiKey) {
+      logger.error('No Jina API key found. Set PROSE_JINA_API_KEY as an environment variable.');
+      process.exit(1);
+    }
+
+    // Backfill all projects
+    if (options.all) {
+      const index = loadMemoryIndex();
+      const projects = Object.keys(index.projects);
+
+      logger.info(`🔍 Backfilling source index for ${projects.length} projects...\n`);
+
+      let totalFiles = 0;
+      let totalChunks = 0;
+      let indexed = 0;
+      let skipped = 0;
+
+      for (const projectName of projects) {
+        const memory = loadProjectMemory(projectName);
+        const rootPath = memory?.rootPath;
+
+        if (!rootPath || !existsSync(rootPath)) {
+          logger.verbose(`⏭️  ${formatProjectName(projectName)}: no rootPath or path doesn't exist`);
+          skipped++;
+          continue;
+        }
+
+        if (!isGitRepo(rootPath)) {
+          logger.verbose(`⏭️  ${formatProjectName(projectName)}: not a git repo`);
+          skipped++;
+          continue;
+        }
+
+        try {
+          logger.info(`📂 ${formatProjectName(projectName)}`);
+          const stats = await indexProjectSource(projectName, rootPath, apiKey);
+          logger.info(`   ✅ ${stats.filesIndexed} files, ${stats.chunksCreated} new chunks`);
+          totalFiles += stats.filesIndexed;
+          totalChunks += stats.chunksCreated;
+          indexed++;
+        } catch (error: any) {
+          logger.warn(`   ⚠️  Failed: ${error.message}`);
+        }
+      }
+
+      logger.info(`\n📊 Summary:`);
+      logger.info(`   Projects indexed: ${indexed}`);
+      logger.info(`   Projects skipped: ${skipped}`);
+      logger.info(`   Total files: ${totalFiles}`);
+      logger.info(`   Total new chunks: ${totalChunks}`);
+      return;
+    }
+
+    // Single project mode
     let projectName = options.project;
     if (!projectName) {
       projectName = detectProjectFromCwd();
@@ -1631,12 +1723,6 @@ indexCmd
         logger.error('Could not detect project from current directory');
         process.exit(1);
       }
-    }
-
-    const apiKey = process.env.PROSE_JINA_API_KEY;
-    if (!apiKey) {
-      logger.error('No Jina API key found. Set PROSE_JINA_API_KEY as an environment variable.');
-      process.exit(1);
     }
 
     try {
