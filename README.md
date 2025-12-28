@@ -38,7 +38,7 @@ As you move across sessions, Prose performs **Horizontal Evolution**. It synthes
 Prose automatically injects your project's evolved memory into your agent's environment (via `CLAUDE.md`). Your agent wakes up every session already knowing what we decided yesterday and why.
 
 ### 🌎 The Global Brain (Vault)
-Your wisdom shouldn't be repo-locked. Prose maintains a Git-backed **Personal Memory Vault** at `~/.claude-prose`. You can search across every project you've ever touched to recall a specific solution or a forgotten refactor.
+Your wisdom shouldn't be repo-locked. Prose maintains a Git-backed **Personal Memory Vault** at `~/.prose`. You can search across every project you've ever touched to recall a specific solution or a forgotten refactor.
 
 ### 🔎 Hybrid Semantic Search
 Powered by **Jina Embeddings v4**, search queries your history using a sophisticated hybrid engine:

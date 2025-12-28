@@ -7,7 +7,7 @@
  * - Searchable index for fractal-grep
  */
 
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs';
+import { existsSync, readFileSync, writeFileSync, mkdirSync, renameSync } from 'fs';
 import { join, dirname } from 'path';
 import { homedir } from 'os';
 import { execSync } from 'child_process';
@@ -94,7 +94,20 @@ export interface MemorySnapshot {
  * Get the default memory storage directory
  */
 export function getMemoryDir(): string {
-  return join(homedir(), '.claude-prose');
+  const oldDir = join(homedir(), '.claude-prose');
+  const newDir = join(homedir(), '.prose');
+
+  if (!existsSync(newDir) && existsSync(oldDir)) {
+    try {
+      console.log(`🚚 Migrating memory from ${oldDir} to ${newDir}...`);
+      renameSync(oldDir, newDir);
+    } catch (error: any) {
+      console.error(`⚠️  Failed to migrate memory directory: ${error.message}`);
+      return oldDir; // Fallback to old dir if migration fails
+    }
+  }
+
+  return newDir;
 }
 
 /**

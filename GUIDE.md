@@ -21,7 +21,7 @@ npm install -g @6digit-studio/prose
 
 ## 🏛️ Personal Memory Vault
 
-The **Vault** is a central, Git-backed repository (stored at `~/.claude-prose`) that version-controls your semantic history across all your projects.
+The **Vault** is a central, Git-backed repository (stored at `~/.prose`) that version-controls your semantic history across all your projects.
 
 ### Initialization
 To start versioning your "global brain":
