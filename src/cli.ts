@@ -64,7 +64,7 @@ const program = new Command();
 program
   .name('prose')
   .description('Semantic memory for AI development - extract, evolve, and query the meaning of your collaboration')
-  .version('0.1.0')
+  .version('0.1.0-alpha.3')
   .option('--api-key <key>', 'Override LLM API key')
   .option('-v, --verbose', 'Show detailed progress')
   .option('-q, --quiet', 'Suppress unnecessary output')
@@ -736,11 +736,11 @@ program
           const extGlobs = (config.sourceExtensions || ['.ts', '.js']).map(ext => `'*${ext}'`).join(' ');
           const changedFiles = manifest?.gitHead
             ? (() => {
-                try {
-                  const diff = execSync(`git diff --name-only ${manifest.gitHead}..${currentHead} -- ${extGlobs}`, { encoding: 'utf-8', cwd });
-                  return diff.split('\n').filter(Boolean).length;
-                } catch { return '?'; }
-              })()
+              try {
+                const diff = execSync(`git diff --name-only ${manifest.gitHead}..${currentHead} -- ${extGlobs}`, { encoding: 'utf-8', cwd });
+                return diff.split('\n').filter(Boolean).length;
+              } catch { return '?'; }
+            })()
             : 'all';
 
           console.log(`\n🔍 Source index outdated (${changedFiles} files changed), re-indexing...`);
