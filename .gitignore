@@ -103,3 +103,8 @@ temp/
 # Generated output
 claude-prose-web/
 web-output/
+
+# Prose local data
+.claude/prose/
+# Prose skill (auto-generated)
+.claude/skills/flash/

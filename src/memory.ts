@@ -59,6 +59,12 @@ export interface GlobalConfig {
   autoIndexSource?: boolean;
   /** Cosine similarity threshold for vector search (0.0-1.0) */
   vectorThreshold?: number;
+  /** API key for Jina embeddings (global fallback) */
+  jinaApiKey?: string;
+  /** API key for OpenRouter LLM (global fallback) */
+  openRouterApiKey?: string;
+  /** Generic LLM API key (global fallback) */
+  llmApiKey?: string;
 }
 
 export interface SessionProcessingState {
@@ -271,7 +277,10 @@ export function getGlobalConfig(): GlobalConfig {
     mirrorMode: (process.env.PROSE_MIRROR_MODE as any) || saved.mirrorMode || 'vault',
     sourceExtensions: saved.sourceExtensions || DEFAULT_SOURCE_EXTENSIONS,
     autoIndexSource: saved.autoIndexSource !== undefined ? saved.autoIndexSource : true,
-    vectorThreshold: saved.vectorThreshold !== undefined ? saved.vectorThreshold : DEFAULT_VECTOR_THRESHOLD
+    vectorThreshold: saved.vectorThreshold !== undefined ? saved.vectorThreshold : DEFAULT_VECTOR_THRESHOLD,
+    jinaApiKey: saved.jinaApiKey,
+    openRouterApiKey: saved.openRouterApiKey,
+    llmApiKey: saved.llmApiKey,
   };
 }
 
@@ -282,6 +291,31 @@ export function saveGlobalConfig(config: GlobalConfig): void {
   const index = loadMemoryIndex();
   index.config = { ...index.config, ...config };
   saveMemoryIndex(index);
+}
+
+/**
+ * Get API key with priority: environment variable > global config
+ * @param keyType - 'jina' | 'openrouter' | 'llm'
+ * @returns API key or undefined if not found
+ */
+export function getApiKey(keyType: 'jina' | 'openrouter' | 'llm'): string | undefined {
+  const config = getGlobalConfig();
+
+  if (keyType === 'jina') {
+    return process.env.PROSE_JINA_API_KEY || config.jinaApiKey;
+  }
+
+  if (keyType === 'openrouter') {
+    return process.env.OPENROUTER_API_KEY || config.openRouterApiKey;
+  }
+
+  // LLM fallback chain: env vars first, then global config
+  return process.env.PROSE_API_KEY ||
+         process.env.LLM_API_KEY ||
+         process.env.OPENROUTER_API_KEY ||
+         process.env.OPENAI_API_KEY ||
+         config.llmApiKey ||
+         config.openRouterApiKey;
 }
 
 export function loadSourceManifest(projectName: string): any | null {
@@ -724,6 +758,67 @@ export async function searchMemory(query: string, options?: {
       // Search quotes
       if (!typeFilter || typeFilter.includes('quote')) {
         searchFragments('quote', snapshot.fragments.narrative?.memorable_quotes || [], q => q.quote, q => q.speaker);
+      }
+    }
+
+    // --- Search current (evolved/merged) fragments ---
+    // These represent the "ground truth" after horizontal evolution
+    if (memory?.current) {
+      const currentTimestamp = new Date(memory.lastUpdated || newestTime);
+      const currentRecencyBonus = 20; // Max recency bonus for evolved content
+
+      const searchCurrentFragments = (type: SearchResult['type'], items: any[], getContent: (item: any) => string, getContext?: (item: any) => string) => {
+        for (const item of items) {
+          const content = getContent(item);
+          const context = getContext ? getContext(item) : undefined;
+          const hash = calculateFragmentHash(type, content, context);
+
+          if (seen.has(hash)) continue;
+
+          let score = 0;
+          let hasVector = false;
+
+          // Vector Score (primary - use exclusively if available)
+          if (queryVector && vectors[hash]) {
+            const similarity = cosineSimilarity(queryVector, vectors[hash]);
+            score = similarity * 100;
+            hasVector = true;
+          }
+
+          // Keyword Score (fallback only when no vector)
+          if (!hasVector) {
+            const keywordScore = scoreMatch(queryTerms, `${content} ${context || ''}`);
+            score = keywordScore * 10;
+          }
+
+          const minKeywordScore = queryTerms.length * 150;
+          const threshold = hasVector ? vectorThreshold : minKeywordScore;
+          if (score >= threshold) {
+            seen.add(hash);
+            results.push({
+              project: projectName,
+              type,
+              content,
+              context,
+              score: score + currentRecencyBonus,
+              timestamp: currentTimestamp,
+            });
+          }
+        }
+      };
+
+      if (!typeFilter || typeFilter.includes('decision')) {
+        searchCurrentFragments('decision', memory.current.decisions?.decisions || [], d => d.what, d => d.why);
+      }
+      if (!typeFilter || typeFilter.includes('insight')) {
+        searchCurrentFragments('insight', memory.current.insights?.insights || [], i => i.learning, i => i.context);
+        searchCurrentFragments('gotcha', memory.current.insights?.gotchas || [], g => g.issue, g => g.solution);
+      }
+      if (!typeFilter || typeFilter.includes('narrative')) {
+        searchCurrentFragments('narrative', memory.current.narrative?.story_beats || [], b => b.summary, b => b.beat_type);
+      }
+      if (!typeFilter || typeFilter.includes('quote')) {
+        searchCurrentFragments('quote', memory.current.narrative?.memorable_quotes || [], q => q.quote, q => q.speaker);
       }
     }
 

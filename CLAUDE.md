@@ -1,7 +1,7 @@
 # Claude Prose - Development Guide
 
 ## Project Awareness
-Implement Semantic Source Indexing for the prose tool to enable natural language code search and context-aware RAG.
+Initial project warmup and codebase exploration to establish a baseline for semantic source indexing.
 
 ## Critical Decisions
 - **Rebranded project from 'claude-prose' to 'prose'.**: To transition from a tool-specific extension to a universal semantic memory layer.
@@ -9,44 +9,31 @@ Implement Semantic Source Indexing for the prose tool to enable natural language
 - **Integrated Jina AI (v3/v4) for semantic retrieval and hybrid search.**: To enable deep conceptual search using a combination of Cosine Similarity, Recency, and Keyword matching.
 - **Adopted Git as the 'Personal Vault' storage engine for ~/.prose.**: Provides built-in versioning, synchronization, and audit trails for semantic history without custom sync logic.
 - **Implemented Persistent Cross-Project Links via `prose link`.**: Allows architectural alignment across workspaces by injecting state from linked projects into the evolution context.
-- **Broadened evolution triggers to include 'stale' projects with linked dependencies.**: Ensures projects reflect changes in dependencies even when no new local sessions exist, using a fallback window of existing snapshots.
-- **Implemented 'Intelligent Design' CLI for manual memory refinement.**: Provides a 'sudo' for project context, allowing human-dictated ground truth to override automated LLM summaries.
 - **Implemented Verbatim Session Mirroring to permanent Markdown files.**: Prevents context loss from Claude Code's log pruning and preserves the nuance of original developer intent.
-- **Refactored session-parser.ts and added LLM timeouts (60s).**: To fix infinite loops in parsing and prevent the CLI from hanging on network/API delays.
-- **Included 'agent-' sessions and broadened CWD-based project detection.**: To ensure the tool learns from its own agentic actions and finds sessions even when directory names don't match perfectly.
-- **Decouple Jina API key from LLM API key (PROSE_JINA_API_KEY).**: The keys belong to incompatible services; falling back to an LLM key for a Jina request is a logical error and leads to confusing API failures.
-- **Implement .gitignore safety checks for the .claude/prose/ directory.**: To prevent accidental leakage of mirrored project data or internal tool state into version control.
-- **Update CLI error messages to explicitly request PROSE_JINA_API_KEY for semantic operations.**: Improves DX by providing clear instructions on which specific service key is missing during search or indexing.
+- **Decouple Jina API key from LLM API key (PROSE_JINA_API_KEY).**: The keys belong to incompatible services; falling back to an LLM key for a Jina request is a logical error.
+- **Replace the /flash slash command with a Claude Code 'skill' that teaches Claude how to use prose search.**: Skills are auto-discovered by Claude Code, reducing friction and ensuring context is always fresh compared to static data dumps.
+- **Pivot CLAUDE.md injection to be opt-in/pruned and use the skill as the primary context delivery mechanism.**: Auto-modifying CLAUDE.md with dense context was too heavy for smaller projects; skills allow for progressive disclosure.
+- **Skill file structure: Directory-based with a mandatory SKILL.md containing YAML frontmatter and Markdown instructions.**: Allows for multi-file skills and easy version control within repositories.
+- **Hierarchical Skill discovery: Enterprise > Personal (~/.claude/skills/) > Project (.claude/skills/) > Plugin.**: Enables scoping of capabilities from individual preferences to team-wide standards.
 - **Use code-aware chunking based on function/class boundaries via regex or light AST parsing.**: Ensures chunks represent conceptual units of code, improving the relevance of semantic search results.
-- **Use Jina Embeddings v4 for vectorization.**: Jina v4 is optimized for code and long-context retrieval; consistent with existing project preferences.
-- **Store source metadata and vectors in dedicated files ([projectName].source.json and [projectName].source-vectors.json) separate from architectural memory.**: Keeps high-density architectural memory clean and efficient; prevents bloat in the primary project memory.
-- **Implement staleness detection using Git HEAD tracking and file content hashing.**: Minimizes Jina token usage and improves performance by only re-indexing changed files.
-- **Introduce explicit CLI commands: 'prose index source' and 'prose search --source'.**: Provides user control over resource-intensive indexing tasks and allows targeted searching.
+- **Implement staleness detection using Git HEAD tracking and file content hashing for automatic re-indexing.**: Minimizes Jina token usage and ensures semantic memory stays synchronized with the codebase without manual intervention.
+- **Adopt a 'Slow and Steady' development philosophy and 'No silent pivots' rule.**: To ensure higher quality results, transparency, and alignment with explicit project instructions.
+- **Use --tag alpha for npm publishing and require manual OTP for 2FA.**: Prevents prerelease versions from being tagged as 'latest' and accommodates account security constraints.
 
 ## Project Insights
-- Automatic migration should be handled at the initialization layer (e.g., getMemoryDir) to ensure zero-config transitions for existing users.
-- Hybrid search scoring should combine Cosine Similarity with Recency and Keyword bonuses; 'new' is often as important as 'relevant' in development.
-- Human-directed corrections (Design Sessions) must be treated as absolute ground truth and prioritized over automated LLM summaries to prevent semantic drift.
-- Treating the central storage directory as a Git repository provides built-in versioning, audit trails, and synchronization without custom sync logic.
-- Evolution should be triggered by 'staleness' (linked project updates) even without local sessions, using the last N snapshots as a context fallback.
-- CWD-awareness reduces friction; if detection fails, the CLI should transition to 'discovery mode' by listing available valid projects.
-- Service-specific API keys should never fall back to a global or generic key if the services are incompatible, as this leads to cryptic authentication errors rather than clear configuration errors.
-- A CLI tool that manages local state should proactively manage or warn about version control (e.g., .gitignore) to prevent users from leaking internal tool data or large indices.
-- When introducing breaking changes to environment variables, error messages in the CLI must be updated to explicitly name the required variable to minimize user friction during the transition.
-- Separating high-density architectural memory from raw source code chunks is necessary to maintain search efficiency and clarity.
-- Source indexing must respect .gitignore and support configurable file extensions to avoid indexing noise (node_modules, build artifacts, etc.).
-- A dedicated '--source' flag in the search command allows users to explicitly toggle between searching architectural memory and raw implementation code.
+- Skills are superior to manual slash commands because they are model-invoked via semantic discovery. A skill should teach the AI how to use tools (like 'prose search') for on-demand retrieval rather than acting as a static data dump.
+- Injecting all decisions and insights into CLAUDE.md by default is too heavy. Use a 'Progressive Disclosure' approach: keep critical Gotchas in the skill/CLAUDE.md but offload historical decisions to semantic search.
+- Skills can enforce safety by restricting Claude to specific tools (e.g., read-only) or command patterns (e.g., git-only bash) when that specific skill is active.
+- The 'init' command must be idempotent to allow users to safely re-run it to update configurations or fix missing files without side effects.
+- Automatic source re-indexing should be triggered by git HEAD changes to ensure the semantic memory stays synchronized with the codebase state without manual intervention.
+- The project follows a 'Slow and Steady' and 'No silent pivots' philosophy, prioritizing transparency and explicit confirmation over development speed.
 
 ## Active Gotchas
-- **Directly renaming directories with `renameSync` can fail across different partitions or filesystems.**: Use a copy-and-delete fallback if `renameSync` fails, though `~` migrations usually succeed with rename.
-- **Infinite loops in session parsing when 'continue' statements bypass the offset increment logic.**: Ensure `currentOffset` is incremented at the very end of the loop body, regardless of conditional skips.
-- **LLM API calls hanging indefinitely, blocking CLI execution.**: Implement `AbortSignal.timeout(60000)` (60s) for all generation calls to ensure a fail-safe exit.
-- **Stalled evolution caused by filtering out 'agent-' prefixed session files.**: Include 'agent-' sessions in discovery to allow the tool to learn from its own automated actions.
-- **Claude Code prunes session logs, leading to permanent loss of historical context.**: Implement Verbatim Session Mirroring to permanent Markdown files during the evolution loop.
-- **Implicit fallback between unrelated service API keys (LLM vs. Jina) creates confusing failure modes.**: Enforce strict 1:1 mapping between environment variables and their respective services; remove all fallbacks to generic 'API_KEY' variables.
-- **Local tool state (like .claude/prose/) can be accidentally committed to version control if not explicitly ignored.**: Implement a 'safety check' during initialization and execution to verify .gitignore contains the tool's data directory.
-- **Naive text splitting for code chunks often breaks conceptual units (like splitting a function in half), leading to poor RAG performance.**: Implement a 'Code-Aware' chunker that respects function/class boundaries using regex or AST parsing.
-- **Frequent re-indexing of large codebases can lead to high token costs and latency with embedding APIs.**: Implement staleness detection using Git HEAD hashes and per-file content hashing to enable incremental indexing.
+- **Claude Code Skills are not automatically reloaded while a session is active.**: You must exit and restart Claude Code to load new or modified Skills.
+- **Skills may fail to trigger if the description is too vague or lacks specific trigger terms.**: Include specific actions (e.g., 'Extract text') and keywords (e.g., 'PDF') in the YAML description field of the SKILL.md frontmatter.
+- **Subagents do not inherit Skills from the main conversation by default.**: Explicitly list required skills in the subagent's AGENT.md file under the 'skills' key.
+- **npm publish fails on prerelease versions without an explicit --tag.**: Always include --tag [tagname] (e.g., --tag alpha) when publishing versions with suffixes like -alpha.x.
+- **Automated publishing flows are interrupted by npm 2FA (Two-Factor Authentication).**: Instruct the user to provide the OTP or run the command manually with the --otp flag when 2FA is enabled.
 
 ## Usage Instructions
 ### 🧠 Semantic Memory & Search
@@ -77,4 +64,4 @@ This project uses `prose` to maintain a cross-session semantic memory of decisio
 
 > [!NOTE]
 > This file is automatically generated from `CLAUDE.md.template` by `prose`.
-> Last updated: 12/28/2025, 5:40:56 AM
+> Last updated: 1/1/2026, 1:55:58 AM

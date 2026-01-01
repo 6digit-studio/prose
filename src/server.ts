@@ -5,7 +5,7 @@
  */
 
 import express from 'express';
-import { loadMemoryIndex, loadProjectMemory, searchMemory, getMemoryStats } from './memory.js';
+import { loadMemoryIndex, loadProjectMemory, searchMemory, getMemoryStats, getApiKey } from './memory.js';
 import { discoverSessionFiles } from './session-parser.js';
 import { join } from 'path';
 import { existsSync } from 'fs';
@@ -101,7 +101,7 @@ app.get('/api/search', async (req, res) => {
     return res.status(400).json({ error: 'Query required' });
   }
 
-  const jinaApiKey = process.env.PROSE_JINA_API_KEY;
+  const jinaApiKey = getApiKey('jina');
 
   const results = await searchMemory(query, {
     projects: project ? [project] : undefined,

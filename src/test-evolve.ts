@@ -6,15 +6,15 @@
 import { discoverSessionFiles, parseSessionFile } from './session-parser.js';
 import { evolveAllFragments, type EvolutionContext } from './evolve.js';
 import { emptyFragments } from './schemas.js';
+import { getApiKey } from './memory.js';
 
 async function main() {
   console.log('=== Claude Prose Fragment Evolution Test ===\n');
 
   // Check for API key
-  const apiKey = process.env.PROSE_API_KEY || process.env.LLM_API_KEY || process.env.OPENROUTER_API_KEY;
+  const apiKey = getApiKey('llm');
   if (!apiKey) {
-    console.log('❌ No API key found. Set PROSE_API_KEY, LLM_API_KEY or OPENROUTER_API_KEY');
-    console.log('   export PROSE_API_KEY="sk-or-..."');
+    console.log('❌ No LLM API key found. Set OPENROUTER_API_KEY env var or use "prose config set openrouter-api-key <key>"');
     process.exit(1);
   }
 
