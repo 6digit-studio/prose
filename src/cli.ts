@@ -1187,30 +1187,69 @@ program
 
       logger.info(`\n💡 Tip: Use "prose status global" for all projects`);
     } else {
-      // Global status (original behavior)
+      // Global status with per-project breakdown
       const stats = getMemoryStats();
       const sessionStats = getSessionStats();
+      const index = loadMemoryIndex();
 
       logger.info('📊 Prose - Global Status\n');
 
-      console.log('📁 Available Sessions:');
-      console.log(`   Total sessions: ${sessionStats.totalSessions}`);
-      console.log(`   Total messages: ${sessionStats.totalMessages.toLocaleString()}`);
-      console.log(`   Projects: ${sessionStats.projects.length}`);
+      // Per-project table
+      const projects = Object.keys(index.projects).sort();
+      if (projects.length > 0) {
+        console.log('┌' + '─'.repeat(74) + '┐');
+        console.log('│ ' + 'Project'.padEnd(28) + 'Sessions'.padStart(10) + 'Decisions'.padStart(11) + 'Insights'.padStart(10) + 'Vectors'.padStart(12) + ' │');
+        console.log('├' + '─'.repeat(74) + '┤');
+
+        let totalDecisions = 0, totalInsights = 0, totalGotchas = 0;
+
+        for (const projectName of projects) {
+          const memory = loadProjectMemory(projectName);
+          if (!memory) continue;
+
+          const shortName = formatProjectName(projectName).slice(0, 26);
+          const sessions = memory.processedSessions?.length || 0;
+          const decisions = memory.current.decisions?.decisions?.length || 0;
+          const insights = memory.current.insights?.insights?.length || 0;
+          const gotchas = memory.current.insights?.gotchas?.length || 0;
+
+          totalDecisions += decisions;
+          totalInsights += insights;
+          totalGotchas += gotchas;
+
+          // Check vector status
+          const vectors = loadProjectVectors(projectName);
+          const vectorCount = Object.keys(vectors).length;
+          const vectorStatus = vectorCount > 0 ? `✓ ${vectorCount}` : '—';
+
+          console.log('│ ' +
+            shortName.padEnd(28) +
+            sessions.toString().padStart(10) +
+            decisions.toString().padStart(11) +
+            (insights + gotchas).toString().padStart(10) +
+            vectorStatus.padStart(12) + ' │');
+        }
+
+        console.log('└' + '─'.repeat(74) + '┘');
+        console.log('');
+      }
+
+      // Summary stats
+      console.log('📈 Totals:');
+      console.log(`   ${stats.totalProjects} projects │ ${stats.totalSessions} sessions │ ${stats.totalDecisions} decisions │ ${stats.totalInsights} insights`);
+
+      // Session discovery info
       if (sessionStats.dateRange.earliest && sessionStats.dateRange.latest) {
-        console.log(`   Date range: ${sessionStats.dateRange.earliest.toLocaleDateString()} - ${sessionStats.dateRange.latest.toLocaleDateString()}`);
+        const fmt = (d: Date) => d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+        console.log(`\n📁 Raw Sessions: ${sessionStats.totalSessions} files (${sessionStats.totalMessages.toLocaleString()} messages)`);
+        console.log(`   Spanning ${fmt(sessionStats.dateRange.earliest)} → ${fmt(sessionStats.dateRange.latest)}`);
       }
 
-      console.log('\n🧠 Evolved Memory:');
-      console.log(`   Projects: ${stats.totalProjects}`);
-      console.log(`   Sessions processed: ${stats.totalSessions}`);
-      console.log(`   Decisions captured: ${stats.totalDecisions}`);
-      console.log(`   Insights captured: ${stats.totalInsights}`);
       if (stats.lastUpdated) {
-        console.log(`   Last updated: ${stats.lastUpdated.toLocaleString()}`);
+        console.log(`\n⏱️  Last evolved: ${stats.lastUpdated.toLocaleString()}`);
       }
 
-      console.log(`\n📂 Memory location: ${getMemoryDir()}`);
+      console.log(`📂 Vault: ${getMemoryDir()}`);
     }
   });
 
