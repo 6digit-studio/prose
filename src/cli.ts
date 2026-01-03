@@ -1616,10 +1616,18 @@ vault
         const { execSync } = await import('child_process');
         execSync(`git -C "${memoryDir}" init`, { stdio: 'inherit' });
 
-        // Add a .gitignore for common temp files if needed
+        // Add a .gitignore - exclude temp files and derived data (vectors)
         const gitignorePath = join(memoryDir, '.gitignore');
         if (!existsSync(gitignorePath)) {
-          writeFileSync(gitignorePath, '*.tmp\n*.bak\n');
+          writeFileSync(gitignorePath, `# Temporary files
+*.tmp
+*.bak
+
+# Derived data - regenerate with: prose index backfill
+*.vectors.json
+*.source-vectors.json
+*.source.json
+`);
         }
 
         execSync(`git -C "${memoryDir}" add .`, { stdio: 'inherit' });
