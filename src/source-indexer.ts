@@ -216,7 +216,7 @@ export async function indexProjectSource(projectName: string, dir: string, apiKe
         const chunks = chunkCode(filePath, content);
         manifest.files[relativePath] = {
             hash: fileHash,
-            chunks: chunks.map(c => ({ ...c, content: '' })), // Store metadata, clear content
+            chunks: chunks, // Keep content for keyword search (source.json is gitignored)
             lastIndexed: new Date().toISOString()
         };
 

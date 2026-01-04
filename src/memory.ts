@@ -652,9 +652,13 @@ export async function searchMemory(query: string, options?: {
   const projectFilter = options?.projects;
   const typeFilter = options?.types;
 
-  // Perform semantic search if API key is available
+  // Hybrid search: short queries (1-2 words) use keyword matching, longer queries use semantic
+  const wordCount = query.trim().split(/\s+/).length;
+  const useKeywordSearch = wordCount <= 2;
+
+  // Perform semantic search only for longer queries (3+ words) and if API key is available
   let queryVector: number[] | null = null;
-  if (options?.jinaApiKey) {
+  if (!useKeywordSearch && options?.jinaApiKey) {
     try {
       const embeddings = await getJinaEmbeddings([query], options.jinaApiKey, { task: 'retrieval.query' });
       if (embeddings.length > 0) {
