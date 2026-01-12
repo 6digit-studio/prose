@@ -27,8 +27,6 @@ export interface MemoryEntry {
   timestamp: Date;
   /** Which sessions contributed to this entry */
   sessionIds: string[];
-  /** Source links for provenance */
-  sourceLinks: SourceLink[];
   /** The evolved fragments */
   fragments: AllFragments;
 }
@@ -94,8 +92,6 @@ export interface ProjectMemory {
     timestamp: Date;
     fragments: AllFragments;
   }>;
-  /** All source links for this project */
-  sourceLinks: SourceLink[];
   /** Historical snapshots (optional, for time travel) */
   history?: MemorySnapshot[];
   /** Projects linked for cross-project context injection */
@@ -381,8 +377,10 @@ export function loadProjectMemory(projectName: string): ProjectMemory | null {
     const parsed = JSON.parse(content);
 
     // Convert date strings back to Date objects
+    // Note: sourceLinks removed - it was write-only provenance data causing vault bloat
+    const { sourceLinks: _ignored, ...rest } = parsed;
     return {
-      ...parsed,
+      ...rest,
       lastUpdated: new Date(parsed.lastUpdated),
       processedSessions: (parsed.processedSessions || []).map((s: any) => ({
         ...s,
@@ -391,10 +389,6 @@ export function loadProjectMemory(projectName: string): ProjectMemory | null {
       sessionSnapshots: (parsed.sessionSnapshots || []).map((s: any) => ({
         ...s,
         timestamp: new Date(s.timestamp),
-      })),
-      sourceLinks: (parsed.sourceLinks || []).map((sl: any) => ({
-        ...sl,
-        timestamp: new Date(sl.timestamp),
       })),
       history: (parsed.history || []).map((h: any) => ({
         ...h,
@@ -472,7 +466,6 @@ export function createProjectMemory(project: string): ProjectMemory {
     lastUpdated: new Date(),
     processedSessions: [],
     sessionSnapshots: [],
-    sourceLinks: [],
     linkedProjects: [],
     history: [],
   };
@@ -486,7 +479,6 @@ export function updateProjectMemory(
   memory: ProjectMemory,
   fragments: AllFragments,
   sessionId: string,
-  sourceLinks: SourceLink[],
   messageCount: number,
   modifiedTime: Date,
   fileSize?: number,
@@ -531,7 +523,6 @@ export function updateProjectMemory(
     lastUpdated: new Date(),
     processedSessions,
     sessionSnapshots,
-    sourceLinks: [...memory.sourceLinks, ...sourceLinks],
     rootPath: rootPath || memory.rootPath,
   };
 }

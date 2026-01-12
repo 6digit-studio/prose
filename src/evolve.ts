@@ -13,7 +13,7 @@ import { createOpenAI } from '@ai-sdk/openai';
 import { generateObject } from 'ai';
 import { z } from 'zod';
 
-import type { Message, SourceLink } from './session-parser.js';
+import type { Message } from './session-parser.js';
 import type { AllFragments, FragmentType, DecisionFragment, InsightFragment, FocusFragment, NarrativeFragment, VocabularyFragment } from './schemas.js';
 import {
   DecisionSchema,
@@ -50,7 +50,6 @@ export interface EvolutionResult<T> {
   data?: T;
   error?: string;
   tokensUsed?: number;
-  sourceLinks: SourceLink[];
 }
 
 export interface EvolutionConfig {
@@ -139,13 +138,11 @@ Evolve the decisions based on the new messages. The schema describes what we nee
       success: true,
       data: object as DecisionFragment,
       tokensUsed: usage.totalTokens,
-      sourceLinks: context.messages.map(m => m.source),
     };
   } catch (error) {
     return {
       success: false,
       error: error instanceof Error ? error.message : 'Unknown error',
-      sourceLinks: [],
     };
   }
 }
@@ -190,13 +187,11 @@ Evolve the insights based on the new messages. The schema describes what we need
       success: true,
       data: object as InsightFragment,
       tokensUsed: usage.totalTokens,
-      sourceLinks: context.messages.map(m => m.source),
     };
   } catch (error) {
     return {
       success: false,
       error: error instanceof Error ? error.message : 'Unknown error',
-      sourceLinks: [],
     };
   }
 }
@@ -242,13 +237,11 @@ Update completely based on what the conversation shows as the current focus.`;
       success: true,
       data: object as FocusFragment,
       tokensUsed: usage.totalTokens,
-      sourceLinks: context.messages.map(m => m.source),
     };
   } catch (error) {
     return {
       success: false,
       error: error instanceof Error ? error.message : 'Unknown error',
-      sourceLinks: [],
     };
   }
 }
@@ -296,13 +289,11 @@ Be selective - only capture truly notable moments and quotes.`;
       success: true,
       data: object as NarrativeFragment,
       tokensUsed: usage.totalTokens,
-      sourceLinks: context.messages.map(m => m.source),
     };
   } catch (error) {
     return {
       success: false,
       error: error instanceof Error ? error.message : 'Unknown error',
-      sourceLinks: [],
     };
   }
 }
@@ -346,7 +337,6 @@ export function evolveVocabulary(
       technologies,
       files,
     },
-    sourceLinks: context.messages.map(m => m.source),
   };
 }
 
@@ -358,7 +348,6 @@ export interface BatchEvolutionResult {
   fragments: AllFragments;
   tokensUsed: number;
   errors: string[];
-  sourceLinks: SourceLink[];
 }
 
 /**
@@ -393,14 +382,6 @@ export async function evolveAllFragments(
     (insightsResult.tokensUsed || 0) +
     (focusResult.tokensUsed || 0) +
     (narrativeResult.tokensUsed || 0);
-
-  const allSourceLinks = [
-    ...decisionsResult.sourceLinks,
-    ...insightsResult.sourceLinks,
-    ...focusResult.sourceLinks,
-    ...narrativeResult.sourceLinks,
-    ...vocabularyResult.sourceLinks,
-  ];
 
   const finalFragments = {
     decisions: decisionsResult.data || currentFragments.decisions,
@@ -448,6 +429,5 @@ export async function evolveAllFragments(
     fragments: finalFragments,
     tokensUsed,
     errors,
-    sourceLinks: allSourceLinks,
   };
 }

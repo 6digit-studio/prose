@@ -483,7 +483,6 @@ program
           memory,
           emptyFragments(), // Start with empty if it's new and empty
           session.sessionId,
-          [],
           totalMessageCount,
           session.modifiedTime,
           lastProcessedBytes
@@ -528,7 +527,6 @@ program
       // For new session: start empty
       const existingSnapshot = memory.sessionSnapshots?.find(s => s.sessionId === session.sessionId);
       let currentFragments = existingSnapshot?.fragments || emptyFragments();
-      let allSourceLinks: typeof messagesToProcess[0]['source'][] = [];
 
       for (let i = 0; i < windows.length; i++) {
         const window = windows[i];
@@ -555,7 +553,6 @@ program
         }
 
         currentFragments = result.fragments;
-        allSourceLinks.push(...result.sourceLinks);
         totalTokens += result.tokensUsed;
       }
 
@@ -564,7 +561,6 @@ program
         memory,
         currentFragments,
         session.sessionId,
-        allSourceLinks,
         totalMessageCount,
         session.modifiedTime,
         lastProcessedBytes,
