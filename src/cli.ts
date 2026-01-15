@@ -58,6 +58,7 @@ import { getGitCommits, isGitRepo, getAntigravityBrains, getAntigravityArtifacts
 import { startServer } from './server.js';
 import { injectMemory, ensureTemplate, initSkillFile, writeSkillFile } from './injector.js';
 import { startDesignSession } from './design.js';
+import { addFragment, detectProject, type FragmentType } from './add.js';
 import * as logger from './logger.js';
 
 const program = new Command();
@@ -1035,6 +1036,46 @@ program
       apiKey,
       model: options.model,
     });
+  });
+
+// ============================================================================
+// add - Direct fragment addition without evolution
+// ============================================================================
+
+program
+  .command('add <type> <content>')
+  .description('Add a fragment directly to project memory (decision, gotcha, insight, focus)')
+  .option('-p, --project <path>', 'Project path (auto-detected from CWD)')
+  .option('--why <reason>', 'Reasoning for decisions')
+  .option('--solution <fix>', 'Solution for gotchas')
+  .option('--context <ctx>', 'Context for insights')
+  .action((type: string, content: string, options) => {
+    const validTypes: FragmentType[] = ['decision', 'gotcha', 'insight', 'focus'];
+    if (!validTypes.includes(type as FragmentType)) {
+      logger.error(`Invalid fragment type: ${type}. Must be one of: ${validTypes.join(', ')}`);
+      process.exit(1);
+    }
+
+    let projectFilter = options.project;
+    if (!projectFilter) {
+      projectFilter = detectProject(process.cwd());
+    }
+
+    if (!projectFilter) {
+      logger.error('Could not detect project. Run `prose evolve` first or specify --project');
+      process.exit(1);
+    }
+
+    try {
+      addFragment(projectFilter, type as FragmentType, content, {
+        why: options.why,
+        solution: options.solution,
+        context: options.context,
+      });
+    } catch (err: any) {
+      logger.error(`Failed to add fragment: ${err.message}`);
+      process.exit(1);
+    }
   });
 
 // ============================================================================
