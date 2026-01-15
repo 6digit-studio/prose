@@ -419,9 +419,12 @@ program
         messagesToProcess = getGitCommits(session.path, 10);
         totalMessageCount = messagesToProcess.length; // Assuming getGitCommits returns all relevant commits
       } else if (session.sourceType === ('design' as any)) {
-        logger.info(`📖 Syncing design session... (${session.sessionId})`);
-        messagesToProcess = parseDesignSession(session.path, session.sessionId);
-        totalMessageCount = messagesToProcess.length;
+        const designMessages = parseDesignSession(session.path, session.sessionId);
+        totalMessageCount = designMessages.length;
+        messagesToProcess = prevState ? designMessages.slice(prevState.messageCount) : designMessages;
+        if (messagesToProcess.length > 0) {
+          logger.info(`📖 Syncing design session... (${session.sessionId})`);
+        }
       } else if (session.sourceType === 'antigravity') {
         const artifactMessages = parseAntigravityArtifact(session.path, session.sessionId, projectName);
         totalMessageCount = artifactMessages.length;
