@@ -67,7 +67,7 @@ const program = new Command();
 program
   .name('prose')
   .description('Semantic memory for AI development - extract, evolve, and query the meaning of your collaboration')
-  .version('0.1.0-alpha.3')
+  .version('0.1.0-alpha.10')
   .option('--api-key <key>', 'Override LLM API key')
   .option('-v, --verbose', 'Show detailed progress')
   .option('-q, --quiet', 'Suppress unnecessary output')
