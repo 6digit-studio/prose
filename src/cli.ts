@@ -504,6 +504,31 @@ program
         }
       }
 
+      // Write verbatim artifacts FIRST (for all sessions, regardless of new messages)
+      // This ensures digital archaeology captures every conversation
+      if (shouldMirror && !['git', 'antigravity', 'design'].includes(session.sourceType as string)) {
+        try {
+          const fullConversation = session.sourceType === 'codex'
+            ? parseCodexSessionFile(session.path)
+            : parseSessionFile(session.path);
+
+          // Security check: If writing to repo, ensure it's ignored
+          if (config.mirrorMode === 'local' && isGitRepo(process.cwd())) {
+            try {
+              execSync('git check-ignore -q .claude/prose/', { stdio: 'ignore' });
+            } catch (e) {
+              console.log('⚠️  SECURITY WARNING: .claude/prose/ is not gitignored. Sessions may be committed accidentally.');
+              console.log('   Run: prose init  (to fix .gitignore automatically)');
+            }
+          }
+
+          const outputDir = config.mirrorMode === 'local' ? join(process.cwd(), '.claude', 'prose') : undefined;
+          writeVerbatimSessionArtifact(fullConversation, outputDir);
+        } catch (e: any) {
+          console.log(`   ⚠️  Failed to write artifact: ${e.message}`);
+        }
+      }
+
       if (messagesToProcess.length === 0) {
         if (trace) console.log('  [TRACE] -> NO MESSAGES: updating metadata to skip next time');
         // Update metadata anyway so we don't keep picking this session up as "new/unprocessed"
@@ -522,26 +547,6 @@ program
       if (options.dryRun) {
         console.log('   [dry-run] Would evolve fragments');
         continue;
-      }
-
-      // Update artifacts if requested
-      if (shouldMirror && !['git', 'antigravity', 'design'].includes(session.sourceType as string)) {
-        const fullConversation = session.sourceType === 'codex'
-          ? parseCodexSessionFile(session.path)
-          : parseSessionFile(session.path);
-
-        // Security check: If writing to repo, ensure it's ignored
-        if (config.mirrorMode === 'local' && isGitRepo(process.cwd())) {
-          try {
-            execSync('git check-ignore -q .claude/prose/', { stdio: 'ignore' });
-          } catch (e) {
-            console.log('⚠️  SECURITY WARNING: .claude/prose/ is not gitignored. Sessions may be committed accidentally.');
-            console.log('   Run: prose init  (to fix .gitignore automatically)');
-          }
-        }
-
-        const outputDir = config.mirrorMode === 'local' ? join(process.cwd(), '.claude', 'prose') : undefined;
-        writeVerbatimSessionArtifact(fullConversation, outputDir);
       }
 
       // Window size for evolution - Gemini Flash has a huge context, we can process 2000 messages at once

@@ -278,7 +278,7 @@ export function parseSessionFile(filePath: string): Conversation {
         // Process the line as before...
         if (parsed.type !== 'file-history-snapshot') {
           if (!sessionId && 'sessionId' in parsed) sessionId = parsed.sessionId;
-          if (!project && 'cwd' in parsed && parsed.cwd) project = parsed.cwd;
+          if (!project && 'cwd' in parsed && parsed.cwd) project = `-${sanitizePath(parsed.cwd)}`;
 
           if (parsed.type === 'user') {
             const text = extractTextContent(parsed.message.content);
@@ -372,7 +372,7 @@ export function parseSessionFileFromOffset(
 
         if (parsed.type !== 'file-history-snapshot') {
           if (!sessionId && 'sessionId' in parsed) sessionId = parsed.sessionId;
-          if (!project && 'cwd' in parsed && parsed.cwd) project = parsed.cwd;
+          if (!project && 'cwd' in parsed && parsed.cwd) project = `-${sanitizePath(parsed.cwd)}`;
 
           if (parsed.type === 'user') {
             const text = extractTextContent(parsed.message.content);
