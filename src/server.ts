@@ -5,10 +5,10 @@
  */
 
 import express from 'express';
-import { loadMemoryIndex, loadProjectMemory, searchMemory, getMemoryStats, getApiKey } from './memory.js';
+import { loadMemoryIndex, loadProjectMemory, searchMemory, getMemoryStats, getApiKey, getMemoryDir } from './memory.js';
 import { discoverSessionFiles } from './session-parser.js';
 import { join } from 'path';
-import { existsSync } from 'fs';
+import { existsSync, readdirSync } from 'fs';
 import crypto from 'crypto';
 
 const app = express();
@@ -146,7 +146,7 @@ app.get('/api/projects/:id/sessions', (req, res) => {
         fullId: s.sessionId,
         timestamp: s.timestamp,
         focus: s.fragments.focus?.current_goal,
-        hasArtifact: memory.rootPath && existsSync(join(memory.rootPath, '.claude', 'prose', `session-${s.sessionId.slice(0, 8)}.md`)),
+        hasArtifact: existsSync(join(getMemoryDir(), 'mirrors', projectId, `session-${s.sessionId.slice(0, 8)}.md`)),
         stats: {
           decisions: decisions.length,
           insights: insights.length,
@@ -191,17 +191,39 @@ app.get('/api/projects/:id/sessions', (req, res) => {
   res.json(sessions);
 });
 
-// Serve session artifacts
+// Get all verbatim artifacts from vault (independent of session snapshots)
+app.get('/api/projects/:id/vault-artifacts', (req, res) => {
+  const projectId = req.params.id;
+  const vaultArtifactsDir = join(getMemoryDir(), 'mirrors', projectId);
+
+  if (!existsSync(vaultArtifactsDir)) {
+    return res.json([]);
+  }
+
+  try {
+    const files = readdirSync(vaultArtifactsDir)
+      .filter(f => f.startsWith('session-') && f.endsWith('.md'))
+      .sort()
+      .reverse();
+
+    res.json(files);
+  } catch (e) {
+    res.json([]);
+  }
+});
+
+// Serve session artifacts from vault
 app.get('/api/projects/:id/artifacts/:filename', (req, res) => {
   const projectId = req.params.id;
   const filename = req.params.filename;
   const memory = loadProjectMemory(projectId);
 
-  if (!memory || !memory.rootPath) {
-    return res.status(404).json({ error: 'Project or root path not found' });
+  if (!memory) {
+    return res.status(404).json({ error: 'Project not found' });
   }
 
-  const artifactPath = join(memory.rootPath, '.claude', 'prose', filename);
+  // Look in vault mirrors directory
+  const artifactPath = join(getMemoryDir(), 'mirrors', projectId, filename);
   if (!existsSync(artifactPath)) {
     return res.status(404).json({ error: 'Artifact not found' });
   }
@@ -662,6 +684,7 @@ const dashboardHtml = `
     let currentTab = 'decisions';
     let projectData = null;
     let sessionsData = [];
+    let vaultArtifacts = [];
 
     // Markdown helper - renders inline markdown safely
     function md(text) {
@@ -697,13 +720,15 @@ const dashboardHtml = `
         el.classList.toggle('active', el.dataset.id === id);
       });
 
-      // Load project data and sessions in parallel
-      const [projectRes, sessionsRes] = await Promise.all([
+      // Load project data, sessions, and vault artifacts in parallel
+      const [projectRes, sessionsRes, vaultRes] = await Promise.all([
         fetch(\`/api/projects/\${encodeURIComponent(id)}\`),
-        fetch(\`/api/projects/\${encodeURIComponent(id)}/sessions\`)
+        fetch(\`/api/projects/\${encodeURIComponent(id)}/sessions\`),
+        fetch(\`/api/projects/\${encodeURIComponent(id)}/vault-artifacts\`)
       ]);
       projectData = await projectRes.json();
       sessionsData = await sessionsRes.json();
+      const vaultArtifacts = await vaultRes.json();
 
       // Update counts
       document.getElementById('decisions-count').textContent = projectData.decisions.length;
@@ -851,6 +876,26 @@ const dashboardHtml = `
                   </a>
                 </div>
               \` : ''}
+            </div>
+          </div>
+        \`;
+      }
+
+      // Add vault artifacts section
+      if (vaultArtifacts && vaultArtifacts.length > 0) {
+        html += \`
+          <div style="margin-top: 2rem; padding-top: 2rem; border-top: 1px solid var(--border);">
+            <h3 style="color: var(--accent); margin-bottom: 1rem;">📚 Verbatim Artifacts (\${vaultArtifacts.length})</h3>
+            <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 0.75rem;">
+              \${vaultArtifacts.map(artifact => {
+                const sessionId = artifact.replace('session-', '').replace('.md', '');
+                return \`
+                  <a href="/api/projects/\${encodeURIComponent(currentProject)}/artifacts/\${artifact}" target="_blank"
+                     style="display: block; padding: 0.75rem; background: var(--bg-tertiary); border: 1px solid var(--border); border-radius: 6px; color: var(--accent); text-decoration: none; font-size: 0.85rem; text-align: center; transition: all 0.2s;">
+                    📄 \${sessionId}
+                  </a>
+                \`;
+              }).join('')}
             </div>
           </div>
         \`;
