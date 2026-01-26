@@ -8,7 +8,7 @@ import express from 'express';
 import { loadMemoryIndex, loadProjectMemory, searchMemory, getMemoryStats, getApiKey, getMemoryDir } from './memory.js';
 import { discoverSessionFiles } from './session-parser.js';
 import { join } from 'path';
-import { existsSync, readdirSync } from 'fs';
+import { existsSync, readdirSync, readFileSync } from 'fs';
 import crypto from 'crypto';
 
 const app = express();
@@ -224,11 +224,20 @@ app.get('/api/projects/:id/artifacts/:filename', (req, res) => {
 
   // Look in vault mirrors directory
   const artifactPath = join(getMemoryDir(), 'mirrors', projectId, filename);
+
   if (!existsSync(artifactPath)) {
-    return res.status(404).json({ error: 'Artifact not found' });
+    console.error(`Artifact not found: ${artifactPath}`);
+    return res.status(404).json({ error: `Artifact not found: ${artifactPath}` });
   }
 
-  res.sendFile(artifactPath);
+  try {
+    const content = readFileSync(artifactPath, 'utf-8');
+    res.setHeader('Content-Type', 'text/markdown; charset=utf-8');
+    res.send(content);
+  } catch (err: any) {
+    console.error(`Error reading artifact ${artifactPath}:`, err);
+    res.status(500).json({ error: `Error reading artifact: ${err.message}` });
+  }
 });
 
 // ============================================================================
