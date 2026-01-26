@@ -20,6 +20,7 @@ config({ path: join(homedir(), '.config', 'prose', '.env'), quiet: true });  // 
 
 import { Command } from 'commander';
 import { discoverSessionFiles, parseSessionFile, parseSessionFileFromOffset, getSessionStats, getClaudeProjectsDir, type Message, type SessionFile } from './session-parser.js';
+import { discoverCodexSessionFiles, parseCodexSessionFile, parseCodexSessionFileFromOffset } from './codex-session-parser.js';
 import { evolveAllFragments } from './evolve.js';
 import { emptyFragments, type AllFragments } from './schemas.js';
 import {
@@ -105,7 +106,13 @@ function detectProjectFromCwd(): string | undefined {
     if (match) return match;
   }
 
-  // 3. Fallback: check session files discovered across all projects
+  // 3. Check Codex sessions for this CWD
+  const codexSessions = discoverCodexSessionFiles(cwd);
+  if (codexSessions.length > 0) {
+    return codexSessions[0].project;
+  }
+
+  // 4. Fallback: check session files discovered across all projects
   const sessions = discoverSessionFiles();
   const projectNames = [...new Set(sessions.map(s => s.project))];
   return projectNames.find(p =>
@@ -308,6 +315,8 @@ program
 
     // Discover sessions
     const sessions = discoverSessionFiles(projectFilter, process.cwd());
+    const codexSessions = discoverCodexSessionFiles(projectFilter);
+    sessions.push(...codexSessions);
 
     // Add Git if requested
     if (options.git) {
@@ -433,50 +442,65 @@ program
         if (messagesToProcess.length > 0) {
           console.log(`📖 Ingesting Antigravity artifact: ${basename(session.path)}...`);
         }
-      } else if (prevState?.fileSize && prevState.fileSize < session.fileSize) {
-        // FAST PATH: Only read new bytes from the file
-        if (trace) console.log(`  [TRACE] -> FAST PATH: byte-offset read from ${prevState.fileSize}`);
-        const result = parseSessionFileFromOffset(
-          session.path,
-          prevState.fileSize,
-          session.sessionId,
-          projectName
-        );
-        messagesToProcess = result.messages;
-        totalMessageCount = prevState.messageCount + result.messages.length;
-        lastProcessedBytes = result.processedBytes;
-        isIncremental = true;
-        console.log(`📖 Updating ${session.sessionId.slice(0, 8)}... (+${result.messages.length} new messages, read ${result.processedBytes - prevState.fileSize} bytes)`);
       } else {
-        // FULL PARSE: New session or no stored fileSize
-        if (trace) console.log(`  [TRACE] -> FULL PARSE: ${prevState?.fileSize ? 'fileSize unchanged or smaller' : 'no stored fileSize'}`);
-        const conversation = parseSessionFile(session.path);
-        totalMessageCount = conversation.messages.length;
-        lastProcessedBytes = conversation.processedBytes;
-        if (trace) console.log(`  [TRACE] parsed ${totalMessageCount} messages from file, processedBytes=${lastProcessedBytes}`);
+        const isCodex = session.sourceType === 'codex';
+        const prevFileSize = prevState?.fileSize;
+        const canIncremental = typeof prevFileSize === 'number' &&
+          prevFileSize < session.fileSize &&
+          (!isCodex || session.path.endsWith('.jsonl'));
 
-        if (prevState && prevState.messageCount < conversation.messages.length) {
-          // Had previous state but no fileSize - slice from message count
-          if (trace) console.log(`  [TRACE] -> INCREMENTAL: prevState.messageCount(${prevState.messageCount}) < parsed(${totalMessageCount})`);
-          messagesToProcess = conversation.messages.slice(prevState.messageCount);
+        if (canIncremental && prevState) {
+          // FAST PATH: Only read new bytes from the file
+          if (trace) console.log(`  [TRACE] -> FAST PATH: byte-offset read from ${prevFileSize}`);
+          const result = isCodex
+            ? parseCodexSessionFileFromOffset(
+                session.path,
+                prevFileSize,
+                session.sessionId,
+                projectName
+              )
+            : parseSessionFileFromOffset(
+                session.path,
+                prevFileSize,
+                session.sessionId,
+                projectName
+              );
+          messagesToProcess = result.messages;
+          totalMessageCount = prevState.messageCount + result.messages.length;
+          lastProcessedBytes = result.processedBytes;
           isIncremental = true;
-          console.log(`📖 Updating ${session.sessionId.slice(0, 8)}... (+${messagesToProcess.length} new messages)`);
-        } else if (prevState && prevState.messageCount >= conversation.messages.length) {
-          // No new messages - but backfill fileSize for fast check optimization
-          if (trace) console.log(`  [TRACE] -> SKIP: prevState.messageCount(${prevState.messageCount}) >= parsed(${totalMessageCount})`);
-          if (!prevState.fileSize || !memory.rootPath) {
-            if (trace) console.log(`  [TRACE] -> backfilling fileSize=${session.fileSize}, rootPath=${process.cwd()}`);
-            prevState.fileSize = session.fileSize;
-            memory.rootPath = process.cwd();
-            saveProjectMemory(memory);
-          }
-          console.log(`📖 Processing ${session.sessionId.slice(0, 8)}... (no new messages, skipping)`);
-          continue;
+          console.log(`📖 Updating ${session.sessionId.slice(0, 8)}... (+${result.messages.length} new messages, read ${result.processedBytes - prevFileSize} bytes)`);
         } else {
-          // New session
-          if (trace) console.log(`  [TRACE] -> NEW SESSION: no prevState`);
-          messagesToProcess = conversation.messages;
-          console.log(`📖 Processing ${session.sessionId.slice(0, 8)}... (${projectName.slice(-30)})`);
+          // FULL PARSE: New session or no stored fileSize
+          if (trace) console.log(`  [TRACE] -> FULL PARSE: ${prevState?.fileSize ? 'fileSize unchanged or smaller' : 'no stored fileSize'}`);
+          const conversation = isCodex ? parseCodexSessionFile(session.path) : parseSessionFile(session.path);
+          totalMessageCount = conversation.messages.length;
+          lastProcessedBytes = conversation.processedBytes;
+          if (trace) console.log(`  [TRACE] parsed ${totalMessageCount} messages from file, processedBytes=${lastProcessedBytes}`);
+
+          if (prevState && prevState.messageCount < conversation.messages.length) {
+            // Had previous state but no fileSize - slice from message count
+            if (trace) console.log(`  [TRACE] -> INCREMENTAL: prevState.messageCount(${prevState.messageCount}) < parsed(${totalMessageCount})`);
+            messagesToProcess = conversation.messages.slice(prevState.messageCount);
+            isIncremental = true;
+            console.log(`📖 Updating ${session.sessionId.slice(0, 8)}... (+${messagesToProcess.length} new messages)`);
+          } else if (prevState && prevState.messageCount >= conversation.messages.length) {
+            // No new messages - but backfill fileSize for fast check optimization
+            if (trace) console.log(`  [TRACE] -> SKIP: prevState.messageCount(${prevState.messageCount}) >= parsed(${totalMessageCount})`);
+            if (!prevState.fileSize || !memory.rootPath) {
+              if (trace) console.log(`  [TRACE] -> backfilling fileSize=${session.fileSize}, rootPath=${process.cwd()}`);
+              prevState.fileSize = session.fileSize;
+              memory.rootPath = process.cwd();
+              saveProjectMemory(memory);
+            }
+            console.log(`📖 Processing ${session.sessionId.slice(0, 8)}... (no new messages, skipping)`);
+            continue;
+          } else {
+            // New session
+            if (trace) console.log(`  [TRACE] -> NEW SESSION: no prevState`);
+            messagesToProcess = conversation.messages;
+            console.log(`📖 Processing ${session.sessionId.slice(0, 8)}... (${projectName.slice(-30)})`);
+          }
         }
       }
 
@@ -502,7 +526,9 @@ program
 
       // Update artifacts if requested
       if (shouldMirror && !['git', 'antigravity', 'design'].includes(session.sourceType as string)) {
-        const fullConversation = parseSessionFile(session.path);
+        const fullConversation = session.sourceType === 'codex'
+          ? parseCodexSessionFile(session.path)
+          : parseSessionFile(session.path);
 
         // Security check: If writing to repo, ensure it's ignored
         if (config.mirrorMode === 'local' && isGitRepo(process.cwd())) {
@@ -1182,12 +1208,16 @@ program
 
       // Raw session files for this project
       const sessions = discoverSessionFiles(detectedProject);
+      const codexSessions = discoverCodexSessionFiles(detectedProject);
+      const allSessions = [...sessions, ...codexSessions];
       let totalMessages = 0;
       let earliestDate: Date | null = null;
       let latestDate: Date | null = null;
 
-      for (const session of sessions) {
-        const conversation = parseSessionFile(session.path);
+      for (const session of allSessions) {
+        const conversation = session.sourceType === 'codex'
+          ? parseCodexSessionFile(session.path)
+          : parseSessionFile(session.path);
         totalMessages += conversation.messages.length;
 
         if (!earliestDate || session.modifiedTime < earliestDate) {
@@ -1199,7 +1229,7 @@ program
       }
 
       console.log('📁 Raw Sessions:');
-      console.log(`   Files: ${sessions.length}`);
+      console.log(`   Files: ${allSessions.length}`);
       console.log(`   Messages: ${totalMessages.toLocaleString()}`);
       if (earliestDate && latestDate) {
         const fmt = (d: Date) => d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
@@ -1215,7 +1245,7 @@ program
         const processedCount = memory.processedSessions?.length || 0;
 
         console.log('\n🧠 Evolved Memory:');
-        console.log(`   Sessions: ${processedCount}/${sessions.length} processed`);
+        console.log(`   Sessions: ${processedCount}/${allSessions.length} processed`);
         console.log(`   Decisions: ${decisions}`);
         console.log(`   Insights: ${insights}`);
         console.log(`   Gotchas: ${gotchas}`);
@@ -1230,7 +1260,36 @@ program
       // Global status with per-project breakdown
       const stats = getMemoryStats();
       const sessionStats = getSessionStats();
+      const codexSessions = discoverCodexSessionFiles();
       const index = loadMemoryIndex();
+
+      let codexMessageCount = 0;
+      let codexEarliest: Date | null = null;
+      let codexLatest: Date | null = null;
+
+      for (const session of codexSessions) {
+        const conversation = parseCodexSessionFile(session.path);
+        codexMessageCount += conversation.messages.length;
+
+        if (!codexEarliest || session.modifiedTime < codexEarliest) {
+          codexEarliest = session.modifiedTime;
+        }
+        if (!codexLatest || session.modifiedTime > codexLatest) {
+          codexLatest = session.modifiedTime;
+        }
+      }
+
+      const rawSessions = sessionStats.totalSessions + codexSessions.length;
+      const rawMessages = sessionStats.totalMessages + codexMessageCount;
+      let rawEarliest = sessionStats.dateRange.earliest;
+      let rawLatest = sessionStats.dateRange.latest;
+
+      if (!rawEarliest || (codexEarliest && codexEarliest < rawEarliest)) {
+        rawEarliest = codexEarliest;
+      }
+      if (!rawLatest || (codexLatest && codexLatest > rawLatest)) {
+        rawLatest = codexLatest;
+      }
 
       logger.info('📊 Prose - Global Status\n');
 
@@ -1279,10 +1338,10 @@ program
       console.log(`   ${stats.totalProjects} projects │ ${stats.totalSessions} sessions │ ${stats.totalDecisions} decisions │ ${stats.totalInsights} insights`);
 
       // Session discovery info
-      if (sessionStats.dateRange.earliest && sessionStats.dateRange.latest) {
+      if (rawEarliest && rawLatest) {
         const fmt = (d: Date) => d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-        console.log(`\n📁 Raw Sessions: ${sessionStats.totalSessions} files (${sessionStats.totalMessages.toLocaleString()} messages)`);
-        console.log(`   Spanning ${fmt(sessionStats.dateRange.earliest)} → ${fmt(sessionStats.dateRange.latest)}`);
+        console.log(`\n📁 Raw Sessions: ${rawSessions} files (${rawMessages.toLocaleString()} messages)`);
+        console.log(`   Spanning ${fmt(rawEarliest)} → ${fmt(rawLatest)}`);
       }
 
       if (stats.lastUpdated) {

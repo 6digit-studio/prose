@@ -53,7 +53,7 @@ export interface Conversation {
   processedBytes: number;
 }
 
-export type SourceType = 'claude-code' | 'git' | 'antigravity';
+export type SourceType = 'claude-code' | 'git' | 'antigravity' | 'codex';
 
 export interface SessionFile {
   path: string;

@@ -19,6 +19,14 @@ export {
   getClaudeProjectsDir,
 } from './session-parser.js';
 
+// Codex session parsing
+export {
+  discoverCodexSessionFiles,
+  parseCodexSessionFile,
+  parseCodexSessionFileFromOffset,
+  getCodexSessionsDir,
+} from './codex-session-parser.js';
+
 // Fragment schemas
 export {
   type AllFragments,
