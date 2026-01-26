@@ -229,19 +229,32 @@ export function discoverSessionFiles(projectPath?: string, currentCwd?: string):
 /**
  * Extract text content from message content (handles both string and array formats)
  */
-function extractTextContent(content: string | Array<{ type: string; text?: string;[key: string]: unknown }>): string {
+function extractTextContent(content: string | Array<{ type: string; text?: string; content?: unknown; [key: string]: unknown }>): string {
   // If it's already a string, return it
   if (typeof content === 'string') {
     return content;
   }
 
-  // If it's an array, extract text blocks
+  // If it's an array, extract text blocks and tool results
   if (Array.isArray(content)) {
     return content
-      .filter((block): block is { type: 'text'; text: string } =>
-        block.type === 'text' && typeof block.text === 'string'
-      )
-      .map(block => block.text)
+      .map((block) => {
+        if (block.type === 'text' && typeof block.text === 'string') {
+          return block.text;
+        }
+        // Handle tool_result content (which can be a string or nested array)
+        if (block.type === 'tool_result') {
+          if (typeof block.content === 'string') {
+            return block.content;
+          }
+          // If content is a nested array, recursively extract from it
+          if (Array.isArray(block.content)) {
+            return extractTextContent(block.content);
+          }
+        }
+        return null;
+      })
+      .filter((text): text is string => text !== null && text.trim() !== '')
       .join('\n\n');
   }
 

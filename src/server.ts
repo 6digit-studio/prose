@@ -281,16 +281,20 @@ app.get('/artifacts/:projectId/:sessionId', (req, res) => {
       } else if (line.startsWith('**Session ID:**')) {
         metadata.sessionId = line.replace('**Session ID:** `', '').replace('`', '').trim();
       } else if (line.startsWith('**Designer:**') || line.startsWith('**Claude:**')) {
-        // Save previous message if any
-        if (inMessage && currentContent.length > 0) {
+        // Detect new role from this line
+        const newRole = line.includes('Designer') ? 'Designer' : 'Claude';
+
+        // Only save previous message if ROLE is changing (not same role marker again)
+        if (inMessage && currentContent.length > 0 && newRole !== currentRole) {
           messages.push({
             role: currentRole,
             content: currentContent.join('\n').trim()
           });
+          currentContent = [];
         }
-        // Start new message
-        currentRole = line.includes('Designer') ? 'Designer' : 'Claude';
-        currentContent = [];
+
+        // Set role and mark as in message
+        currentRole = newRole;
         inMessage = true;
       } else if (line === '---' || line === '') {
         // Skip separators and empty lines at message boundaries
