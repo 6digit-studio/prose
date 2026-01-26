@@ -240,6 +240,279 @@ app.get('/api/projects/:id/artifacts/:filename', (req, res) => {
   }
 });
 
+// View artifact as beautiful rendered HTML
+app.get('/artifacts/:projectId/:sessionId', (req, res) => {
+  const { projectId, sessionId } = req.params;
+  const artifactPath = join(getMemoryDir(), 'mirrors', projectId, `session-${sessionId}.md`);
+
+  if (!existsSync(artifactPath)) {
+    return res.status(404).send(`
+      <!DOCTYPE html>
+      <html>
+        <body style="font-family: sans-serif; padding: 2rem; color: #333;">
+          <h1>404 - Artifact Not Found</h1>
+          <p>Could not find artifact at: ${artifactPath}</p>
+          <a href="/">← Back to Dashboard</a>
+        </body>
+      </html>
+    `);
+  }
+
+  try {
+    const content = readFileSync(artifactPath, 'utf-8');
+
+    // Parse the markdown to extract metadata and messages
+    const lines = content.split('\n');
+    let metadata = { title: '', date: '', projectName: '', sessionId: '' };
+    let messages: Array<{ role: string; content: string }> = [];
+    let inMessage = false;
+    let currentRole = '';
+    let currentContent: string[] = [];
+
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+
+      if (line.startsWith('# Session:')) {
+        metadata.title = line.replace('# Session: ', '').trim();
+      } else if (line.startsWith('**Date:**')) {
+        metadata.date = line.replace('**Date:** ', '').trim();
+      } else if (line.startsWith('**Project:**')) {
+        metadata.projectName = line.replace('**Project:** ', '').trim();
+      } else if (line.startsWith('**Session ID:**')) {
+        metadata.sessionId = line.replace('**Session ID:** `', '').replace('`', '').trim();
+      } else if (line.startsWith('**Designer:**') || line.startsWith('**Claude:**')) {
+        // Save previous message if any
+        if (inMessage && currentContent.length > 0) {
+          messages.push({
+            role: currentRole,
+            content: currentContent.join('\n').trim()
+          });
+        }
+        // Start new message
+        currentRole = line.includes('Designer') ? 'Designer' : 'Claude';
+        currentContent = [];
+        inMessage = true;
+      } else if (line === '---' || line === '') {
+        // Skip separators and empty lines at message boundaries
+        if (inMessage && currentContent.length > 0 && line === '---') {
+          messages.push({
+            role: currentRole,
+            content: currentContent.join('\n').trim()
+          });
+          inMessage = false;
+          currentContent = [];
+        }
+      } else if (inMessage) {
+        currentContent.push(line);
+      }
+    }
+
+    // Save last message
+    if (inMessage && currentContent.length > 0) {
+      messages.push({
+        role: currentRole,
+        content: currentContent.join('\n').trim()
+      });
+    }
+
+    // Render as HTML
+    const messagesHtml = messages.map((msg, i) => {
+      const isDesigner = msg.role === 'Designer';
+      const bgColor = isDesigner ? '#0d1117' : '#161b22';
+      const borderColor = isDesigner ? '#30363d' : '#3fb950';
+      const roleColor = isDesigner ? '#58a6ff' : '#3fb950';
+
+      return `
+        <div style="margin: 1.5rem 0; padding: 1.5rem; background: ${bgColor}; border-left: 3px solid ${borderColor}; border-radius: 4px;">
+          <div style="font-weight: 600; color: ${roleColor}; margin-bottom: 0.75rem; font-size: 0.9rem; text-transform: uppercase;">
+            ${msg.role}
+          </div>
+          <div class="message-content markdown-body" style="color: #c9d1d9; line-height: 1.6; word-wrap: break-word;">
+            ${escapeHtml(msg.content)
+              .split('\n\n')
+              .map(para => `<p>${para.split('\n').join('<br>')}</p>`)
+              .join('')}
+          </div>
+        </div>
+      `;
+    }).join('');
+
+    const html = `
+      <!DOCTYPE html>
+      <html lang="en">
+      <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Session ${metadata.title}</title>
+        <style>
+          :root {
+            --bg: #0d1117;
+            --bg-secondary: #161b22;
+            --text: #c9d1d9;
+            --text-muted: #8b949e;
+            --accent: #58a6ff;
+            --green: #3fb950;
+            --border: #30363d;
+          }
+
+          * { box-sizing: border-box; margin: 0; padding: 0; }
+
+          body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            line-height: 1.6;
+          }
+
+          header {
+            background: var(--bg-secondary);
+            border-bottom: 1px solid var(--border);
+            padding: 1.5rem;
+            sticky: top;
+            top: 0;
+            z-index: 100;
+          }
+
+          .header-content {
+            max-width: 900px;
+            margin: 0 auto;
+          }
+
+          .breadcrumb {
+            font-size: 0.85rem;
+            color: var(--text-muted);
+            margin-bottom: 1rem;
+          }
+
+          .breadcrumb a {
+            color: var(--accent);
+            text-decoration: none;
+          }
+
+          .breadcrumb a:hover { text-decoration: underline; }
+
+          h1 {
+            font-size: 1.5rem;
+            margin-bottom: 0.5rem;
+            color: var(--accent);
+          }
+
+          .meta {
+            display: flex;
+            gap: 2rem;
+            font-size: 0.9rem;
+            color: var(--text-muted);
+            flex-wrap: wrap;
+          }
+
+          .meta-item {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+          }
+
+          .container {
+            max-width: 900px;
+            margin: 2rem auto;
+            padding: 0 1.5rem;
+          }
+
+          .conversation {
+            background: var(--bg);
+          }
+
+          footer {
+            text-align: center;
+            padding: 2rem 1.5rem;
+            color: var(--text-muted);
+            font-size: 0.85rem;
+            border-top: 1px solid var(--border);
+            margin-top: 3rem;
+          }
+
+          code {
+            background: var(--bg-secondary);
+            padding: 0.2em 0.4em;
+            border-radius: 3px;
+            font-family: 'Courier New', monospace;
+            font-size: 0.9em;
+          }
+
+          pre {
+            background: var(--bg-secondary);
+            padding: 1rem;
+            border-radius: 4px;
+            overflow-x: auto;
+            margin: 1rem 0;
+            border: 1px solid var(--border);
+          }
+
+          pre code {
+            background: none;
+            padding: 0;
+          }
+        </style>
+      </head>
+      <body>
+        <header>
+          <div class="header-content">
+            <div class="breadcrumb">
+              <a href="/">🏛️ Claude Prose</a> / Vault Artifact
+            </div>
+            <h1>📄 Session ${metadata.title}</h1>
+            <div class="meta">
+              <div class="meta-item">📅 ${metadata.date}</div>
+              <div class="meta-item">🆔 ${metadata.sessionId}</div>
+              <div class="meta-item">📦 ${metadata.projectName}</div>
+              <div class="meta-item">💬 ${messages.length} messages</div>
+            </div>
+          </div>
+        </header>
+
+        <div class="container">
+          <div class="conversation">
+            ${messagesHtml}
+          </div>
+        </div>
+
+        <footer>
+          <p>✨ Preserved by <strong>Claude Prose</strong> — Digital Archaeology 🏛️</p>
+          <p style="margin-top: 0.5rem; font-size: 0.8rem;">
+            <a href="/" style="color: var(--accent); text-decoration: none;">← Back to Dashboard</a>
+          </p>
+        </footer>
+      </body>
+      </html>
+    `;
+
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.send(html);
+  } catch (err: any) {
+    console.error(`Error rendering artifact:`, err);
+    res.status(500).send(`
+      <!DOCTYPE html>
+      <html>
+        <body style="font-family: sans-serif; padding: 2rem; color: #333;">
+          <h1>500 - Error Rendering Artifact</h1>
+          <p>${err.message}</p>
+          <a href="/">← Back to Dashboard</a>
+        </body>
+      </html>
+    `);
+  }
+});
+
+function escapeHtml(text: string): string {
+  const map: { [key: string]: string } = {
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&#039;'
+  };
+  return text.replace(/[&<>"']/g, m => map[m]);
+}
+
 // ============================================================================
 // Dashboard HTML
 // ============================================================================
@@ -880,8 +1153,10 @@ const dashboardHtml = `
 
               \${session.hasArtifact ? \`
                 <div class="session-section" style="margin-top: 1.5rem; text-align: right;">
-                  <a href="/api/projects/\${encodeURIComponent(currentProject)}/artifacts/session-\${session.id}.md" target="_blank" style="color: var(--accent); font-size: 0.8rem; text-decoration: none; border: 1px solid var(--accent); padding: 0.25rem 0.5rem; border-radius: 4px;">
-                    📄 View Markdown Artifact
+                  <a href="/artifacts/\${encodeURIComponent(currentProject)}/\${session.id}" style="color: var(--accent); font-size: 0.8rem; text-decoration: none; border: 1px solid var(--accent); padding: 0.25rem 0.5rem; border-radius: 4px; transition: all 0.2s; display: inline-block; cursor: pointer;"
+                     onmouseover="this.style.background='var(--accent)'; this.style.color='#000'"
+                     onmouseout="this.style.background='transparent'; this.style.color='var(--accent)'">
+                    📄 View Artifact
                   </a>
                 </div>
               \` : ''}
@@ -899,8 +1174,10 @@ const dashboardHtml = `
               \${vaultArtifacts.map(artifact => {
                 const sessionId = artifact.replace('session-', '').replace('.md', '');
                 return \`
-                  <a href="/api/projects/\${encodeURIComponent(currentProject)}/artifacts/\${artifact}" target="_blank"
-                     style="display: block; padding: 0.75rem; background: var(--bg-tertiary); border: 1px solid var(--border); border-radius: 6px; color: var(--accent); text-decoration: none; font-size: 0.85rem; text-align: center; transition: all 0.2s;">
+                  <a href="/artifacts/\${encodeURIComponent(currentProject)}/\${sessionId}"
+                     style="display: block; padding: 0.75rem; background: var(--bg-tertiary); border: 1px solid var(--border); border-radius: 6px; color: var(--accent); text-decoration: none; font-size: 0.85rem; text-align: center; transition: all 0.2s; cursor: pointer;"
+                     onmouseover="this.style.background='var(--bg-secondary)'; this.style.borderColor='var(--accent)'"
+                     onmouseout="this.style.background='var(--bg-tertiary)'; this.style.borderColor='var(--border)'">
                     📄 \${sessionId}
                   </a>
                 \`;
