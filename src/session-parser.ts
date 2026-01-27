@@ -235,22 +235,12 @@ function extractTextContent(content: string | Array<{ type: string; text?: strin
     return content;
   }
 
-  // If it's an array, extract text blocks and tool results
+  // If it's an array, extract only text blocks (exclude tool results to keep archives clean)
   if (Array.isArray(content)) {
     return content
       .map((block) => {
         if (block.type === 'text' && typeof block.text === 'string') {
           return block.text;
-        }
-        // Handle tool_result content (which can be a string or nested array)
-        if (block.type === 'tool_result') {
-          if (typeof block.content === 'string') {
-            return block.content;
-          }
-          // If content is a nested array, recursively extract from it
-          if (Array.isArray(block.content)) {
-            return extractTextContent(block.content);
-          }
         }
         return null;
       })
