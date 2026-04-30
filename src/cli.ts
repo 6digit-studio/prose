@@ -60,6 +60,9 @@ import { startServer } from './server.js';
 import { injectMemory, ensureTemplate, initSkillFile, writeSkillFile } from './injector.js';
 import { startDesignSession } from './design.js';
 import { addFragment, detectProject, type FragmentType } from './add.js';
+import { snap } from './snap.js';
+import { whisper } from './whisper.js';
+import { standup } from './standup.js';
 import * as logger from './logger.js';
 
 const program = new Command();
@@ -1614,6 +1617,133 @@ program
 
     const targetPath = artifactsDir || join(getMemoryDir(), 'mirrors', projectName);
     logger.success(`Exported ${count} verbatim artifacts to ${targetPath}`);
+  });
+
+// ============================================================================
+// snap - Verbatim readout of recent activity in current cwd
+// ============================================================================
+
+program
+  .command('snap')
+  .description('Verbatim readout of recent Claude Code sessions in the current cwd (orient without retracing)')
+  .option('--bytes <n>', 'Byte budget for assembled text (default 4000)', (v) => parseInt(v, 10))
+  .option('--turns <n>', 'Last N messages per session (default 4)', (v) => parseInt(v, 10))
+  .option('--sessions <n>', 'Max sessions to include (default 5)', (v) => parseInt(v, 10))
+  .option('--include-current', 'Include the actively-written session (default skipped)')
+  .option('--cwd <path>', 'Override current working directory')
+  .option('--json', 'Emit JSON with metadata instead of plain text')
+  .action((options) => {
+    const result = snap({
+      cwd: options.cwd,
+      bytes: options.bytes,
+      turnsPerSession: options.turns,
+      maxSessions: options.sessions,
+      includeCurrent: options.includeCurrent === true,
+    });
+
+    if (options.json) {
+      process.stdout.write(JSON.stringify(result, null, 2) + '\n');
+      return;
+    }
+
+    if (result.sessionsIncluded === 0) {
+      process.stderr.write(`No recent sessions found for cwd ${result.cwd}.\n`);
+      process.exit(1);
+    }
+
+    process.stdout.write(result.text);
+    const trail = `\n# snap: ${result.sessionsIncluded} session(s), ${result.turnsIncluded} message(s), ${result.bytes} bytes${result.truncated ? ' (truncated by budget)' : ''}\n`;
+    process.stderr.write(trail);
+  });
+
+// ============================================================================
+// whisper - Light semantic compression of recent activity in the current cwd
+// ============================================================================
+
+program
+  .command('whisper')
+  .description('Streamed prose summary of recent Claude Code sessions in the current cwd (one cheap LLM pass, no persistence)')
+  .option('--bytes <n>', 'Byte budget for the verbatim window fed to the LLM (default 4000)', (v) => parseInt(v, 10))
+  .option('--turns <n>', 'Last N messages per session in the window (default 4)', (v) => parseInt(v, 10))
+  .option('--sessions <n>', 'Max sessions to include (default 5)', (v) => parseInt(v, 10))
+  .option('--include-current', 'Include the actively-written session (default skipped)')
+  .option('--cwd <path>', 'Override current working directory')
+  .option('--model <model>', 'Override the LLM model (default google/gemini-3-flash-preview)')
+  .option('--api-key <key>', 'Override the LLM API key')
+  .action(async (options) => {
+    const apiKey = options.apiKey || getApiKey('llm');
+    if (!apiKey) {
+      logger.error('No LLM API key found. Set OPENROUTER_API_KEY env var or use "prose config set openrouter-api-key <key>"');
+      process.exit(1);
+    }
+
+    const result = await whisper({
+      apiKey,
+      model: options.model,
+      cwd: options.cwd,
+      bytes: options.bytes,
+      turnsPerSession: options.turns,
+      maxSessions: options.sessions,
+      includeCurrent: options.includeCurrent === true,
+    });
+
+    if (!result.emitted) {
+      process.stderr.write(`No recent sessions found for cwd ${result.source.cwd}.\n`);
+      process.exit(1);
+    }
+
+    const meta = result.source;
+    const trail = `\n# whisper: ${meta.sessionsIncluded} session(s), ${meta.turnsIncluded} message(s), ${meta.bytes} bytes in${meta.truncated ? ' (truncated by budget)' : ''}\n`;
+    process.stderr.write(trail);
+  });
+
+// ============================================================================
+// standup - Cross-cwd, time-windowed compression of recent activity
+// ============================================================================
+
+program
+  .command('standup')
+  .description('Streamed cross-project standup over recent Claude Code activity, grouped by working directory')
+  .option('--since <duration>', 'Time window: e.g. 30m, 4h, 1d, 2h30m (default 4h)')
+  .option('--turns <n>', 'Last N messages per session within the window (default 6)', (v) => parseInt(v, 10))
+  .option('--bytes-per-session <n>', 'Per-session byte cap on rendered tail (default 1500)', (v) => parseInt(v, 10))
+  .option('--total-bytes <n>', 'Total byte cap on assembled LLM input (default 24000)', (v) => parseInt(v, 10))
+  .option('--sessions <n>', 'Max sessions across all projects (default 30)', (v) => parseInt(v, 10))
+  .option('--include-current', 'Include the actively-written session (default skipped)')
+  .option('--model <model>', 'Override the LLM model (default google/gemini-3-flash-preview)')
+  .option('--api-key <key>', 'Override the LLM API key')
+  .action(async (options) => {
+    const apiKey = options.apiKey || getApiKey('llm');
+    if (!apiKey) {
+      logger.error('No LLM API key found. Set OPENROUTER_API_KEY env var or use "prose config set openrouter-api-key <key>"');
+      process.exit(1);
+    }
+
+    let result;
+    try {
+      result = await standup({
+        apiKey,
+        model: options.model,
+        since: options.since,
+        turnsPerSession: options.turns,
+        bytesPerSession: options.bytesPerSession,
+        totalBytes: options.totalBytes,
+        maxSessions: options.sessions,
+        includeCurrent: options.includeCurrent === true,
+      });
+    } catch (err) {
+      logger.error(err instanceof Error ? err.message : String(err));
+      process.exit(1);
+    }
+
+    if (!result.emitted) {
+      process.stderr.write(`No sessions found in the last ${options.since ?? '4h'}.\n`);
+      process.exit(1);
+    }
+
+    const projectList = result.projects.map(p => `${p.cwd} (${p.sessionCount}s/${p.messageCount}m)`).join(', ');
+    const trail = `\n# standup: ${result.sessionsIncluded} session(s) across ${result.projects.length} project(s), ${result.promptBytes} bytes in — ${projectList}\n`;
+    process.stderr.write(trail);
   });
 
 // ============================================================================
