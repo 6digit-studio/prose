@@ -64,6 +64,12 @@ export interface SessionFile {
   fileSize: number;
   /** Type of source */
   sourceType?: SourceType;
+  /**
+   * Working directory the session was launched in, when known at discovery time.
+   * Populated by Codex discovery (read from session metadata). Claude Code
+   * sessions leave this undefined — cwd is per-message and resolved on parse.
+   */
+  cwd?: string;
 }
 
 // Raw JSONL line types (as they appear in the file)

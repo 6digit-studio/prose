@@ -100,5 +100,13 @@ export {
   evolveHorizontal,
 } from './horizontal.js';
 
+// Read verbs (verbatim, no LLM)
+export { snap, type SnapOptions, type SnapResult, type SnapSessionMeta } from './snap.js';
+export { whisper, type WhisperOptions, type WhisperResult, type WhisperBlock } from './whisper.js';
+
+// LLM-compaction verbs
+export { gossip, type GossipOptions, type GossipResult } from './gossip.js';
+export { standup, type StandupOptions, type StandupResult, type StandupProjectMeta } from './standup.js';
+
 // Web server
 export { startServer } from './server.js';

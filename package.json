@@ -1,7 +1,7 @@
 {
   "name": "@6digit/prose",
-  "version": "0.1.0-alpha.13",
-  "description": "Semantic memory for AI development (EXPERIMENTAL/ALPHA)",
+  "version": "0.5.0",
+  "description": "Semantic memory and stateless session inspection for AI-driven development (EXPERIMENTAL)",
   "author": "6digit-studio",
   "repository": {
     "type": "git",
@@ -22,15 +22,21 @@
   },
   "files": [
     "dist",
+    "skill",
     "README.md",
     "LICENSE"
   ],
   "keywords": [
     "ai",
     "claude",
+    "claude-code",
+    "codex",
+    "acp",
     "semantic-memory",
     "development-history",
-    "fragment-evolution"
+    "fragment-evolution",
+    "session-inspection",
+    "standup"
   ],
   "license": "MIT",
   "dependencies": {

@@ -13,6 +13,10 @@ import { createOpenAI } from '@ai-sdk/openai';
 import { streamText } from 'ai';
 
 import { discoverSessionFiles, parseSessionFile, type Message } from './session-parser.js';
+import {
+  discoverCodexSessionFiles,
+  parseCodexSessionFile,
+} from './codex-session-parser.js';
 
 export interface StandupOptions {
   apiKey: string;
@@ -141,20 +145,32 @@ function renderTail(messages: Message[], byteCap: number): string {
 
 export async function standup(opts: StandupOptions): Promise<StandupResult> {
   const out = opts.out ?? process.stdout;
-  const windowMs = parseDuration(opts.since ?? '4h');
-  const turnsPerSession = opts.turnsPerSession ?? 6;
+  // 7d default: a project rhythm window, not an "in the last few hours"
+  // window. The byte cap controls volume; the window only decides which
+  // sessions are recent enough to be worth surfacing.
+  const windowMs = parseDuration(opts.since ?? '7d');
+  const turnsPerSession = opts.turnsPerSession ?? 10;
   const bytesPerSession = opts.bytesPerSession ?? 1500;
-  const totalBytes = opts.totalBytes ?? 24000;
-  const maxSessions = opts.maxSessions ?? 30;
+  const totalBytes = opts.totalBytes ?? 60000;
+  const maxSessions = opts.maxSessions ?? 80;
   const liveWindowMs = opts.liveSessionWindowMs ?? 60_000;
   const includeCurrent = opts.includeCurrent ?? false;
 
   const cutoff = Date.now() - windowMs;
-  const allFiles = discoverSessionFiles();
+  const claudeFiles = discoverSessionFiles();
+  const codexFiles = discoverCodexSessionFiles();
+  // No per-source cap here: standup is already time-windowed by mtime, so
+  // Claude Code can't structurally crowd Codex out the way snap's flat
+  // candidate slice did. Sort by mtime, drop everything below the cutoff
+  // in the parse loop.
+  const allFiles = [...claudeFiles, ...codexFiles].sort(
+    (a, b) => b.modifiedTime.getTime() - a.modifiedTime.getTime()
+  );
 
   type Kept = {
     cwd: string;
     sessionId: string;
+    sourceType: 'claude-code' | 'codex';
     messages: Message[];
     lastMessageTime: Date;
   };
@@ -167,20 +183,23 @@ export async function standup(opts: StandupOptions): Promise<StandupResult> {
       // the parse safely — content time is bounded above by mtime for append-only logs.
       continue;
     }
-    const conv = parseSessionFile(f.path);
+    const isCodex = f.sourceType === 'codex';
+    const conv = isCodex ? parseCodexSessionFile(f.path) : parseSessionFile(f.path);
     if (conv.messages.length === 0) continue;
     const last = conv.messages[conv.messages.length - 1];
+    // Window controls inclusion (did this session do anything recently?),
+    // not which messages we surface. A session that drifted into the window
+    // for a few messages should still get its full tail of context, even if
+    // most of that tail predates the cutoff.
     if (last.timestamp.getTime() < cutoff) continue;
     if (!includeCurrent && Date.now() - last.timestamp.getTime() < liveWindowMs) continue;
 
-    // Keep only messages inside the window.
-    const inWindow = conv.messages.filter(m => m.timestamp.getTime() >= cutoff);
-    if (inWindow.length === 0) continue;
-
-    const tail = inWindow.slice(-turnsPerSession);
+    const tail = conv.messages.slice(-turnsPerSession);
+    const cwd = f.cwd ?? readSessionCwd(f.path, f.project);
     kept.push({
-      cwd: readSessionCwd(f.path, f.project),
+      cwd,
       sessionId: conv.sessionId,
+      sourceType: isCodex ? 'codex' : 'claude-code',
       messages: tail,
       lastMessageTime: last.timestamp,
     });

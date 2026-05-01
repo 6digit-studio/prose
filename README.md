@@ -1,13 +1,33 @@
 # Prose 🧠
 
-### **Your AI agent forgets the "Why". Prose helps it remember.**
+### **Your AI agent forgets the "Why". Prose helps it remember — and helps you catch up in seconds.**
 
 > [!WARNING]
-> **ALPHA / EXPERIMENTAL**: This tool is in early development. It automates high-token LLM operations to build project memory. Use with awareness.
+> **EXPERIMENTAL**: Some operations run LLM passes over your session history. Defaults are designed to be cheap (Gemini Flash, byte-budgeted), but be deliberate before automating aggressive multi-pass workflows.
 
-Prose is a **universal semantic memory layer** for engineering. It doesn't just log sessions; it evolves them into a persistent, searchable **Project Consciousness**.
+Prose is a **universal semantic memory layer** for AI-driven engineering. It reads the journal your agents already write — Claude Code (CLI + ACP), Codex, and more — and gives you two complementary surfaces on top of it:
 
-By transforming noisy development logs into refined architectural fragments, Prose ensures your AI agent knows as much about your project's trajectory as you do.
+### 🧬 Evolution — long-term compression
+Turn months of session logs into structured **Decisions**, **Insights**, and **Narrative** fragments. Persistent, searchable, distilled. The "why" behind everything you've built. ([How Evolution Works ↓](#-how-evolution-works))
+
+### 👁️‍🗨️ Sensory Verbs — short-term, stateless inspection
+
+Two pure read verbs (no LLM, instant, free) and two LLM-compaction verbs (one cheap pass, pennies):
+
+|                                | verbatim     | LLM compaction |
+|--------------------------------|--------------|----------------|
+| 1 cwd                          | **`snap`**   | —              |
+| neighborhood (project family)  | **`whisper`**| **`gossip`**   |
+| all cwds, time-windowed        | —            | **`standup`**  |
+
+- **`prose snap`** — verbatim tail of recent sessions in this cwd. No LLM.
+- **`prose whisper`** — verbatim tail across this repo and its conceptual sibling repos (auto-detected by name — e.g. `6digit-studio` brings the entire `6digit-*` family). No LLM.
+- **`prose gossip`** — one short paragraph over a `whisper`. Casual register, like a colleague catching you up.
+- **`prose standup`** — cross-project standup of your week, grouped by repo. Formal daily-standup register.
+
+All four support `--json` for machine-readable output. Pure read-side, zero state, callable from anywhere. ([Sensory Verbs ↓](#%EF%B8%8F%EF%B8%8F-sensory-verbs--cheap-stateless-inspection))
+
+Every verb works over the **same journal** — so a `gossip` shows what your terminal CLI, your editor's ACP integration, and your Codex sessions have all been doing across the family, in one go.
 
 ---
 
@@ -37,7 +57,9 @@ Because it operates on snapshots and logs, it is perfectly suited for **fast, lo
 
 ### 🔌 Multi-Source Agnostic
 Prose isn't just for Claude Code. It already features deep integration with:
-- **Claude Code**: Native session log parsing.
+- **Claude Code (CLI)**: Native session log parsing.
+- **Claude Code (ACP)**: Brain personas and editor integrations that drive Claude through the Agent Client Protocol write the same JSONL format to the same path — so they're surfaced for free.
+- **Codex**: Native parsing of Codex CLI session rollouts (`~/.codex/sessions/`).
 - **Antigravity**: Intelligent artifact and plan discovery.
 - **Extensible**: We are committed to adding more sources (PRs welcome!) to feed the evolution loop.
 
@@ -72,6 +94,40 @@ Prose takes your security seriously:
 - **Centralized Vault**: Verbatim session mirrors live in `~/.prose/mirrors/`, kept out of your project repositories by default.
 - **Redaction**: Common secrets (API keys, tokens) are automatically scrubbed from session records before storage.
 - **Gitignore Safety**: `prose init` automatically protects your local project from accidental session leakage.
+
+---
+
+## 👁️‍🗨️ Sensory Verbs — Cheap, Stateless Inspection
+
+Beyond evolution, Prose ships four pure read-side verbs for orienting on recent activity without retracing. Two are pure verbatim (no LLM, no API key, instant); two layer one cheap LLM pass on top:
+
+- **`prose snap`** — Verbatim tail of recent sessions in the current cwd. No LLM. JSON or plain text. Cheap, instant. The raw sensory input.
+- **`prose whisper`** — Verbatim tail across the cwd **and its conceptual sibling repos** (a "project family"). No LLM — just `snap` widened to the whole family. Use this as the verbatim source for your own pipelines.
+- **`prose gossip`** — One short LLM paragraph over a `whisper`. Casual register — colleague catching you up over coffee. Pennies per call.
+- **`prose standup`** — Cross-project standup. 7-day window by default, last 10 messages per active session, grouped by project. A single LLM pass gives you a tight project-by-project narrative of your week. Formal register — daily-standup tone, "what changed / what's next."
+
+Every verb supports `--json` for machine-readable output: the verbatim verbs return structured snap/whisper objects (text + per-session metadata + per-member blocks); the LLM verbs return the same plus the emitted paragraph as a field instead of streaming.
+
+### Project-Family Discovery (whisper / gossip)
+
+`whisper` (and `gossip`, which builds on it) auto-resolves your cwd into its conceptual neighborhood by **tokenizing the directory name** and **substring-matching against sibling directories** in the parent, weighted by token rarity. So:
+
+- `~/src/6digit-studio` → the full `6digit-*` family (app, satellite, membrane, sidetrack, …)
+- `~/src/koru` → every `koru-*` and `koru_*` repo, plus things like `korulang_org` (substring match) and `monaco-koru-mode` (token in the middle)
+- A repo whose name shares no rare tokens with any sibling → just itself
+
+No config, no manifest. The structure you've already encoded in your parent directory *is* the project graph. Pass `--cwd-only` to opt out and operate on a single directory.
+
+### Stateless by Design
+These verbs hold **zero state** — no cursors, no caches, no last-run timestamps. Call them from anywhere — terminal, CI, an agent's tool fan-out, a brain persona's toolset — and always get a current answer. Statelessness is what lets multiple consumers read the same journal without coordination overhead, and it's what makes the verbs safe to embed anywhere.
+
+### Multi-Agent at the Inspection Layer
+Because these verbs read the same persistent journal that every Claude Code surface writes to (`~/.claude/projects/...`), they automatically include:
+- Terminal Claude Code sessions
+- Brain-persona ACP sessions (via claude-agent-acp)
+- Codex sessions (`~/.codex/sessions/`)
+
+`whisper` (or `gossip`) a directory and you see what *all* your agents — across surfaces — have been doing there. The boundary between "I typed it in a terminal" and "a brain persona ran an ACP turn" mostly disappears.
 
 ---
 
@@ -117,7 +173,14 @@ prose evolve
 prose index source # NEW: Vectorize your codebase
 ```
 
-### 4. Search Implementation
+### 4. (Recommended) Install the Claude Code skill
+If you use Claude Code, install the prose skill so future sessions know how and when to reach for it:
+```bash
+prose skill install
+```
+This drops a `SKILL.md` into `~/.claude/skills/prose/`. Claude Code auto-loads it, so future agent sessions will use `prose snap`/`whisper`/`gossip`/`standup` for orientation instead of asking you to copy-paste session logs.
+
+### 5. Search Implementation
 Find the "Why" (decisions) or the "How" (code) semantically:
 ```bash
 # Search decisions and insights

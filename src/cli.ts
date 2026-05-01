@@ -62,6 +62,7 @@ import { startDesignSession } from './design.js';
 import { addFragment, detectProject, type FragmentType } from './add.js';
 import { snap } from './snap.js';
 import { whisper } from './whisper.js';
+import { gossip } from './gossip.js';
 import { standup } from './standup.js';
 import * as logger from './logger.js';
 
@@ -70,7 +71,7 @@ const program = new Command();
 program
   .name('prose')
   .description('Semantic memory for AI development - extract, evolve, and query the meaning of your collaboration')
-  .version('0.1.0-alpha.11')
+  .version('0.4.0')
   .option('--api-key <key>', 'Override LLM API key')
   .option('-v, --verbose', 'Show detailed progress')
   .option('-q, --quiet', 'Suppress unnecessary output')
@@ -1625,7 +1626,7 @@ program
 
 program
   .command('snap')
-  .description('Verbatim readout of recent Claude Code sessions in the current cwd (orient without retracing)')
+  .description('Verbatim readout of recent agent sessions in the current cwd (Claude Code CLI, ACP, and Codex). Orient without retracing.')
   .option('--bytes <n>', 'Byte budget for assembled text (default 4000)', (v) => parseInt(v, 10))
   .option('--turns <n>', 'Last N messages per session (default 4)', (v) => parseInt(v, 10))
   .option('--sessions <n>', 'Max sessions to include (default 5)', (v) => parseInt(v, 10))
@@ -1657,19 +1658,63 @@ program
   });
 
 // ============================================================================
-// whisper - Light semantic compression of recent activity in the current cwd
+// whisper - Neighborhood-aware verbatim readout (no LLM)
 // ============================================================================
 
 program
   .command('whisper')
-  .description('Streamed prose summary of recent Claude Code sessions in the current cwd (one cheap LLM pass, no persistence)')
-  .option('--bytes <n>', 'Byte budget for the verbatim window fed to the LLM (default 4000)', (v) => parseInt(v, 10))
-  .option('--turns <n>', 'Last N messages per session in the window (default 4)', (v) => parseInt(v, 10))
-  .option('--sessions <n>', 'Max sessions to include (default 5)', (v) => parseInt(v, 10))
+  .description('Verbatim readout of recent agent sessions across the cwd and its conceptual sibling repos (project family). Reads Claude Code CLI, ACP, and Codex. No LLM — pure read.')
+  .option('--bytes <n>', 'Byte budget for the assembled verbatim text (default 4000)', (v) => parseInt(v, 10))
+  .option('--turns <n>', 'Last N messages per session (default 4)', (v) => parseInt(v, 10))
+  .option('--sessions <n>', 'Max sessions to include per repo (default: 5 for self, 2 for siblings)', (v) => parseInt(v, 10))
   .option('--include-current', 'Include the actively-written session (default skipped)')
   .option('--cwd <path>', 'Override current working directory')
+  .option('--cwd-only', 'Skip neighborhood expansion — collect only this cwd (no sibling repos)')
+  .option('--json', 'Emit JSON with metadata + per-member blocks instead of plain text')
+  .action((options) => {
+    const result = whisper({
+      cwd: options.cwd,
+      bytes: options.bytes,
+      turnsPerSession: options.turns,
+      maxSessions: options.sessions,
+      includeCurrent: options.includeCurrent === true,
+      cwdOnly: options.cwdOnly === true,
+    });
+
+    if (options.json) {
+      process.stdout.write(JSON.stringify(result, null, 2) + '\n');
+      return;
+    }
+
+    if (!result.emitted) {
+      process.stderr.write(`No recent sessions found for cwd ${result.cwd}.\n`);
+      process.exit(1);
+    }
+
+    process.stdout.write(result.text);
+    const repoList = result.neighborhood.length > 1
+      ? ` across ${result.neighborhood.length} repo(s) [${result.neighborhood.map((n) => n.name).join(', ')}]`
+      : '';
+    const trail = `\n# whisper: ${result.sessionsIncluded} session(s), ${result.turnsIncluded} message(s), ${result.bytes} bytes${result.truncated ? ' (truncated by budget)' : ''}${repoList}\n`;
+    process.stderr.write(trail);
+  });
+
+// ============================================================================
+// gossip - Casual LLM compaction over a whisper (neighborhood paragraph)
+// ============================================================================
+
+program
+  .command('gossip')
+  .description('Streamed prose paragraph over recent agent sessions across the cwd and its conceptual sibling repos. Casual register — like a colleague catching you up over coffee. One cheap LLM pass over a `whisper`, no persistence.')
+  .option('--bytes <n>', 'Byte budget for the verbatim window fed to the LLM (default 4000)', (v) => parseInt(v, 10))
+  .option('--turns <n>', 'Last N messages per session in the window (default 4)', (v) => parseInt(v, 10))
+  .option('--sessions <n>', 'Max sessions to include per repo (default: 5 for self, 2 for siblings)', (v) => parseInt(v, 10))
+  .option('--include-current', 'Include the actively-written session (default skipped)')
+  .option('--cwd <path>', 'Override current working directory')
+  .option('--cwd-only', 'Skip neighborhood expansion — gossip only this cwd (no sibling repos)')
   .option('--model <model>', 'Override the LLM model (default google/gemini-3-flash-preview)')
   .option('--api-key <key>', 'Override the LLM API key')
+  .option('--json', 'Emit JSON with the source whisper + paragraph instead of streaming the paragraph to stdout')
   .action(async (options) => {
     const apiKey = options.apiKey || getApiKey('llm');
     if (!apiKey) {
@@ -1677,7 +1722,15 @@ program
       process.exit(1);
     }
 
-    const result = await whisper({
+    // For JSON mode, capture the LLM stream into a buffer instead of stdout
+    // so the caller gets a clean structured payload.
+    const { Writable } = await import('stream');
+    let captured = '';
+    const sink = options.json
+      ? new Writable({ write(chunk, _enc, cb) { captured += chunk.toString(); cb(); } })
+      : process.stdout;
+
+    const result = await gossip({
       apiKey,
       model: options.model,
       cwd: options.cwd,
@@ -1685,7 +1738,14 @@ program
       turnsPerSession: options.turns,
       maxSessions: options.sessions,
       includeCurrent: options.includeCurrent === true,
+      cwdOnly: options.cwdOnly === true,
+      out: sink,
     });
+
+    if (options.json) {
+      process.stdout.write(JSON.stringify(result, null, 2) + '\n');
+      return;
+    }
 
     if (!result.emitted) {
       process.stderr.write(`No recent sessions found for cwd ${result.source.cwd}.\n`);
@@ -1693,7 +1753,10 @@ program
     }
 
     const meta = result.source;
-    const trail = `\n# whisper: ${meta.sessionsIncluded} session(s), ${meta.turnsIncluded} message(s), ${meta.bytes} bytes in${meta.truncated ? ' (truncated by budget)' : ''}\n`;
+    const repoList = meta.neighborhood.length > 1
+      ? ` across ${meta.neighborhood.length} repo(s) [${meta.neighborhood.map((n) => n.name).join(', ')}]`
+      : '';
+    const trail = `\n# gossip: ${meta.sessionsIncluded} session(s), ${meta.turnsIncluded} message(s), ${meta.bytes} bytes in${meta.truncated ? ' (truncated by budget)' : ''}${repoList}\n`;
     process.stderr.write(trail);
   });
 
@@ -1703,21 +1766,28 @@ program
 
 program
   .command('standup')
-  .description('Streamed cross-project standup over recent Claude Code activity, grouped by working directory')
-  .option('--since <duration>', 'Time window: e.g. 30m, 4h, 1d, 2h30m (default 4h)')
-  .option('--turns <n>', 'Last N messages per session within the window (default 6)', (v) => parseInt(v, 10))
+  .description('Streamed cross-project standup over recent agent activity (Claude Code CLI, ACP, and Codex), grouped by working directory')
+  .option('--since <duration>', 'Time window for session inclusion: e.g. 30m, 4h, 1d, 2h30m (default 7d). Window decides which sessions to surface; per-session tail length is independent.')
+  .option('--turns <n>', "Last N messages per session — taken from the session's overall tail, not the in-window slice (default 10)", (v) => parseInt(v, 10))
   .option('--bytes-per-session <n>', 'Per-session byte cap on rendered tail (default 1500)', (v) => parseInt(v, 10))
-  .option('--total-bytes <n>', 'Total byte cap on assembled LLM input (default 24000)', (v) => parseInt(v, 10))
-  .option('--sessions <n>', 'Max sessions across all projects (default 30)', (v) => parseInt(v, 10))
+  .option('--total-bytes <n>', 'Total byte cap on assembled LLM input (default 60000)', (v) => parseInt(v, 10))
+  .option('--sessions <n>', 'Max sessions across all projects (default 80)', (v) => parseInt(v, 10))
   .option('--include-current', 'Include the actively-written session (default skipped)')
   .option('--model <model>', 'Override the LLM model (default google/gemini-3-flash-preview)')
   .option('--api-key <key>', 'Override the LLM API key')
+  .option('--json', 'Emit JSON with metadata + full text instead of streaming to stdout')
   .action(async (options) => {
     const apiKey = options.apiKey || getApiKey('llm');
     if (!apiKey) {
       logger.error('No LLM API key found. Set OPENROUTER_API_KEY env var or use "prose config set openrouter-api-key <key>"');
       process.exit(1);
     }
+
+    const { Writable } = await import('stream');
+    let captured = '';
+    const sink = options.json
+      ? new Writable({ write(chunk, _enc, cb) { captured += chunk.toString(); cb(); } })
+      : process.stdout;
 
     let result;
     try {
@@ -1730,20 +1800,122 @@ program
         totalBytes: options.totalBytes,
         maxSessions: options.sessions,
         includeCurrent: options.includeCurrent === true,
+        out: sink,
       });
     } catch (err) {
       logger.error(err instanceof Error ? err.message : String(err));
       process.exit(1);
     }
 
+    if (options.json) {
+      process.stdout.write(JSON.stringify(result, null, 2) + '\n');
+      return;
+    }
+
     if (!result.emitted) {
-      process.stderr.write(`No sessions found in the last ${options.since ?? '4h'}.\n`);
+      process.stderr.write(`No sessions found in the last ${options.since ?? '7d'}.\n`);
       process.exit(1);
     }
 
     const projectList = result.projects.map(p => `${p.cwd} (${p.sessionCount}s/${p.messageCount}m)`).join(', ');
     const trail = `\n# standup: ${result.sessionsIncluded} session(s) across ${result.projects.length} project(s), ${result.promptBytes} bytes in — ${projectList}\n`;
     process.stderr.write(trail);
+  });
+
+// ============================================================================
+// skill - Install/uninstall the prose Claude Code skill
+// ============================================================================
+
+const skillCmd = program
+  .command('skill')
+  .description('Install or manage the `prose` Claude Code skill — drops a SKILL.md into ~/.claude/skills/prose/ so future Claude sessions know how and when to use prose');
+
+skillCmd
+  .command('install')
+  .description('Install the prose skill into ~/.claude/skills/prose/SKILL.md')
+  .option('--force', 'Overwrite an existing SKILL.md')
+  .action(async (options) => {
+    const { fileURLToPath } = await import('url');
+    const { dirname, join } = await import('path');
+    const fs = await import('fs');
+    const os = await import('os');
+
+    const here = dirname(fileURLToPath(import.meta.url));
+    // dist/cli.js → ../skill/SKILL.md
+    const sourcePath = join(here, '..', 'skill', 'SKILL.md');
+    if (!fs.existsSync(sourcePath)) {
+      logger.error(`Skill source missing at ${sourcePath}. This is a packaging bug — file an issue.`);
+      process.exit(1);
+    }
+
+    const targetDir = join(os.homedir(), '.claude', 'skills', 'prose');
+    const targetPath = join(targetDir, 'SKILL.md');
+
+    if (fs.existsSync(targetPath) && !options.force) {
+      logger.warn(`SKILL.md already exists at ${targetPath}.`);
+      logger.warn('Use --force to overwrite, or `prose skill uninstall` first.');
+      process.exit(1);
+    }
+
+    fs.mkdirSync(targetDir, { recursive: true });
+    fs.copyFileSync(sourcePath, targetPath);
+
+    logger.success(`Installed prose skill at ${targetPath}`);
+    logger.info('Future Claude Code sessions will pick it up automatically.');
+  });
+
+skillCmd
+  .command('uninstall')
+  .description('Remove ~/.claude/skills/prose/SKILL.md')
+  .action(async () => {
+    const { join } = await import('path');
+    const fs = await import('fs');
+    const os = await import('os');
+
+    const targetDir = join(os.homedir(), '.claude', 'skills', 'prose');
+    const targetPath = join(targetDir, 'SKILL.md');
+
+    if (!fs.existsSync(targetPath)) {
+      logger.warn(`No prose skill installed at ${targetPath}. Nothing to do.`);
+      return;
+    }
+
+    fs.unlinkSync(targetPath);
+    // Remove the directory if it's empty.
+    try {
+      fs.rmdirSync(targetDir);
+    } catch {
+      // Directory not empty (user may have added other files) — leave it alone.
+    }
+
+    logger.success(`Removed prose skill from ${targetPath}`);
+  });
+
+skillCmd
+  .command('show')
+  .description('Print the prose SKILL.md contents to stdout (so you can preview before installing)')
+  .action(async () => {
+    const { fileURLToPath } = await import('url');
+    const { dirname, join } = await import('path');
+    const fs = await import('fs');
+
+    const here = dirname(fileURLToPath(import.meta.url));
+    const sourcePath = join(here, '..', 'skill', 'SKILL.md');
+    if (!fs.existsSync(sourcePath)) {
+      logger.error(`Skill source missing at ${sourcePath}.`);
+      process.exit(1);
+    }
+
+    process.stdout.write(fs.readFileSync(sourcePath, 'utf-8'));
+  });
+
+skillCmd
+  .command('path')
+  .description('Print the install path (~/.claude/skills/prose/SKILL.md) without installing')
+  .action(async () => {
+    const { join } = await import('path');
+    const os = await import('os');
+    process.stdout.write(join(os.homedir(), '.claude', 'skills', 'prose', 'SKILL.md') + '\n');
   });
 
 // ============================================================================

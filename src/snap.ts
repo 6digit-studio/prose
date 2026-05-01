@@ -8,6 +8,10 @@
  */
 
 import { discoverSessionFiles, parseSessionFile, type Message } from './session-parser.js';
+import {
+  discoverCodexSessionFiles,
+  parseCodexSessionFile,
+} from './codex-session-parser.js';
 
 export interface SnapOptions {
   cwd?: string;
@@ -52,12 +56,15 @@ function formatAge(ms: number): string {
 
 function renderSessionBlock(
   sessionId: string,
+  sourceLabel: string,
   lastMessageTime: Date,
   ageLabel: string,
   tail: Message[]
 ): string {
   const lines: string[] = [];
-  lines.push(`=== Session ${sessionId.slice(0, 8)} (${ageLabel}, last message ${lastMessageTime.toISOString()}) ===`);
+  lines.push(
+    `=== ${sourceLabel} session ${sessionId.slice(0, 8)} (${ageLabel}, last message ${lastMessageTime.toISOString()}) ===`
+  );
   for (const msg of tail) {
     lines.push(`[${msg.timestamp.toISOString()}] ${msg.role.toUpperCase()}:`);
     lines.push(msg.content);
@@ -76,12 +83,20 @@ export function snap(opts: SnapOptions = {}): SnapResult {
 
   // Pass cwd as both projectPath and currentCwd so we hit the cwd-match
   // primary scan AND the misfiled-session secondary scan.
-  const allFiles = discoverSessionFiles(cwd, cwd);
+  const claudeFiles = discoverSessionFiles(cwd, cwd);
+  const codexFiles = discoverCodexSessionFiles(cwd);
   const now = Date.now();
 
   // Parse a wider set of candidates than maxSessions so we can re-sort by
-  // content recency (mtime can be skewed by indexers/touches).
-  const candidatePool = allFiles.slice(0, Math.max(maxSessions * 3, 15));
+  // content recency (mtime can be skewed by indexers/touches). Take a per-
+  // source slice so a noisy source can't crowd the others out — without this,
+  // a project with hundreds of Claude Code JSONLs starves Codex sessions
+  // from ever reaching the parse stage.
+  const perSourceCap = Math.max(maxSessions * 3, 15);
+  const candidatePool = [
+    ...claudeFiles.slice(0, perSourceCap),
+    ...codexFiles.slice(0, perSourceCap),
+  ].sort((a, b) => b.modifiedTime.getTime() - a.modifiedTime.getTime());
 
   type Parsed = {
     file: typeof candidatePool[number];
@@ -92,7 +107,8 @@ export function snap(opts: SnapOptions = {}): SnapResult {
 
   const parsed: Parsed[] = [];
   for (const f of candidatePool) {
-    const conv = parseSessionFile(f.path);
+    const conv =
+      f.sourceType === 'codex' ? parseCodexSessionFile(f.path) : parseSessionFile(f.path);
     if (conv.messages.length === 0) continue;
     const lastMessageTime = conv.messages[conv.messages.length - 1].timestamp;
     const contentAgeMs = now - lastMessageTime.getTime();
@@ -115,8 +131,10 @@ export function snap(opts: SnapOptions = {}): SnapResult {
     }
 
     const tail = p.conv.messages.slice(-turnsPerSession);
+    const sourceLabel = p.file.sourceType === 'codex' ? 'Codex' : 'Claude Code';
     const block = renderSessionBlock(
       p.conv.sessionId,
+      sourceLabel,
       p.lastMessageTime,
       formatAge(p.contentAgeMs),
       tail

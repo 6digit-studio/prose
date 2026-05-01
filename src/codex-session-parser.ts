@@ -304,6 +304,7 @@ export function discoverCodexSessionFiles(projectPath?: string): SessionFile[] {
         modifiedTime: stats.mtime,
         fileSize: stats.size,
         sourceType: 'codex',
+        cwd: meta.cwd,
       });
     }
   }

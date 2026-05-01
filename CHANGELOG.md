@@ -1,0 +1,43 @@
+# Changelog
+
+All notable changes to `@6digit/prose` are documented here.
+
+The format is loosely based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
+This project follows [Semantic Versioning](https://semver.org/), with the caveat that pre-1.0 minor bumps may include breaking changes.
+
+## [0.5.0] — 2026-05-01
+
+### Added
+
+- **`prose gossip`** — new LLM-compaction verb that runs one streaming Gemini-Flash pass over a `whisper` to produce a short paragraph (3–5 sentences) in casual, "colleague catching you up over coffee" register. Pairs with `standup` on a tone axis: gossip = casual neighborhood, standup = formal cross-project.
+- **`--json`** on `whisper`, `gossip`, and `standup`. All four sensory verbs now have a machine-readable mode for piping into downstream tools. The verbatim verbs return structured snap/whisper objects (text + per-session metadata + per-member blocks); the LLM verbs return the same plus the emitted paragraph as a field instead of streaming.
+- Library exports for `snap`, `whisper`, `gossip`, `standup` (plus their option/result types) from `@6digit/prose`.
+
+### Changed (BREAKING)
+
+- **`prose whisper` no longer calls an LLM.** It is now a pure verbatim read across the project family — effectively `snap` widened to the conceptual neighborhood. The previous LLM-paragraph behavior now lives in `prose gossip`.
+- The `whisper(...)` library function dropped its `apiKey` / `model` / `temperature` / `out` options and changed return shape: `{ cwd, text, bytes, sessionsIncluded, turnsIncluded, truncated, neighborhood, blocks, emitted }`. Migration: most callers want `gossip(...)` instead, which preserves the old whisper signature exactly.
+- `prose whisper` CLI no longer requires `OPENROUTER_API_KEY` / `--api-key`.
+
+### Rationale
+
+`whisper` was doing two distinct jobs — multi-cwd verbatim collection AND LLM compaction — and the collection job was inaccessible without paying the LLM cost or intercepting `result.source` in JS. Splitting them gives composability: you can pipe `whisper` into your own LLM, into a different downstream tool, into membrane evolve, etc., without burning tokens on a paragraph you'll throw away. The new four-verb grid is orthogonal on two axes: scope (1 cwd / neighborhood / all-cwds) × compaction (verbatim / LLM).
+
+### Skill
+
+- `prose skill install` now ships an updated `SKILL.md` that documents the four-verb grid and the `--json` mode.
+
+## [0.4.0] — unreleased
+
+This version was bumped in working tree but never published. Its contents ship as part of 0.5.0:
+
+- **Sensory verbs** (`snap`, `whisper`, `standup`) introduced as a first-class surface alongside fragment evolution.
+- **Codex session parsing** — native parsing of Codex CLI session rollouts in `~/.codex/sessions/`.
+- **ACP session inclusion** — Claude-Code-via-ACP sessions surface alongside terminal CLI sessions automatically (same JSONL format, same path).
+- **Project-family neighborhood discovery** — `whisper` auto-resolves the cwd into its conceptual sibling repos by tokenizing the directory name and substring-matching against siblings, weighted by token rarity.
+- README rewritten around the dual surface (evolution + sensory verbs).
+- Dropped the "ALPHA" tag from package description.
+
+## [0.1.0-alpha.13] — earlier
+
+Last published alpha. Prose was a single-surface tool focused on fragment evolution from Claude Code session logs.
