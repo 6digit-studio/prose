@@ -1,6 +1,6 @@
 ---
 name: prose
-description: ALWAYS CHECK FIRST when you need to orient on recent work. `prose` is a stateless CLI that reads agent session journals (Claude Code CLI, ACP, Codex). Two read verbs (`snap`, `whisper`) are pure-verbatim; two compaction verbs (`gossip`, `standup`) layer one cheap LLM pass on top. Don't say "I don't remember" or guess from filenames before running prose.
+description: ALWAYS CHECK FIRST when you need to orient on recent work. `prose` is a stateless CLI that reads agent session journals (Claude Code CLI, ACP, Codex). Two read verbs (`snap`, `whisper`) are pure-verbatim; two compaction verbs (`gossip`, `standup`) layer one cheap LLM pass on top. Don't say "I don't remember" or guess from filenames before running prose. Also fire when the user mentions prose itself ("look at prose", "show me prose", "does prose work", "try prose") — default to `snap`, never dump `--help` and ask what to do.
 ---
 
 # prose — Stateless Inspection Over Your Agent Journal
@@ -14,6 +14,7 @@ description: ALWAYS CHECK FIRST when you need to orient on recent work. `prose` 
 - The user asks what they were working on (in this project, the family, or the whole week).
 - You're tempted to say "I don't have context on that" — check prose first; the data is on disk.
 - You need to feed a recent session into your reasoning without retracing.
+- The user references the prose tool itself ("look at prose", "show me prose", "does prose work", "try prose") — run `snap`, don't dump `--help` and ask what to do. Demonstrating the tool *is* the answer.
 
 **Don't use prose when:**
 
@@ -103,7 +104,7 @@ prose standup --json            # structured project breakdown + text
 
 ## Common mistakes
 
-- **Asking the user instead of running it.** Prose is on the user's PATH. Run it.
+- **Asking the user instead of running it.** Prose is on the user's PATH. Run it. This includes meta-questions ("look at our prose tool") — the right move is `snap`, not `--help` followed by "what do you want me to do?"
 - **Treating it like persistent memory.** Prose verbs are *stateless reads*. They don't accumulate. For long-term memory, use `prose evolve` / `search` (different surface).
 - **Skipping it because "I'll just guess."** If you're guessing, you're fabricating. Spend the 2 seconds.
 - **Reaching for `gossip` when you wanted raw text.** Gossip costs LLM tokens for a paragraph. If you're going to feed the result into your own reasoning, use `whisper` and skip the middle compression.
