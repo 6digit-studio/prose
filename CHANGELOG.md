@@ -5,6 +5,20 @@ All notable changes to `@6digit/prose` are documented here.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project follows [Semantic Versioning](https://semver.org/), with the caveat that pre-1.0 minor bumps may include breaking changes.
 
+## [0.6.0] — 2026-05-04
+
+### Added
+
+- **Git commit injection in `standup`.** Each project section now includes a `### Commits in window` block listing the project's git log oneline within the time window, alongside the existing session tails. The system prompt teaches the LLM to weight commits as ground truth for what shipped, and to treat session tails as biased toward end-of-session "noted for later" framings.
+- New `StandupOptions` fields: `bytesPerCommitBlock` (per-project byte cap on the commit block, default 800) and `commitsPerProject` (max commits surfaced per project, default 30). Commit bytes are accounted for in the existing `totalBytes` budget.
+- `StandupProjectMeta.commitCount` reports how many commits were surfaced per project.
+- New `getCommitsSince(repoPath, since, limit)` and `GitCommitSummary` exports in `source-parsers`.
+- CLI trail line for `standup` now reports total commits and per-project commit counts (`Ns/Mm/Cc`).
+
+### Rationale
+
+`standup` was reconstructing project state from the *last 10 messages* of each session — a window that biases heavily toward "what we said we'd do next" and can't tell whether an open thread was resolved in a later session. Cross-referencing against the actual git log gives the LLM a verifiable record of what landed, lets it correctly classify "open thread" vs "shipped," and grounds factual claims in concrete commits the user can cite.
+
 ## [0.5.0] — 2026-05-01
 
 ### Added

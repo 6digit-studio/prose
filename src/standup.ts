@@ -17,6 +17,7 @@ import {
   discoverCodexSessionFiles,
   parseCodexSessionFile,
 } from './codex-session-parser.js';
+import { isGitRepo, getCommitsSince, type GitCommitSummary } from './source-parsers.js';
 
 export interface StandupOptions {
   apiKey: string;
@@ -31,6 +32,10 @@ export interface StandupOptions {
   bytesPerSession?: number;
   /** Total byte cap on the assembled LLM input. Default 24000. */
   totalBytes?: number;
+  /** Per-project byte cap on the injected git commit block. Default 800. */
+  bytesPerCommitBlock?: number;
+  /** Max commits per project surfaced in the commit block. Default 30. */
+  commitsPerProject?: number;
   /** Max sessions across all projects. Default 30. */
   maxSessions?: number;
   /** Skip sessions whose last message is within this many ms (live session). Default 60_000. */
@@ -45,6 +50,7 @@ export interface StandupProjectMeta {
   cwd: string;
   sessionCount: number;
   messageCount: number;
+  commitCount: number;
 }
 
 export interface StandupResult {
@@ -56,13 +62,18 @@ export interface StandupResult {
   emitted: boolean;
 }
 
-const SYSTEM_PROMPT = `You are giving a quick standup — a project-by-project readout of the user's recent Claude Code activity across multiple working directories. Verbatim tails are provided below, grouped by cwd.
+const SYSTEM_PROMPT = `You are giving a quick standup — a project-by-project readout of the user's recent Claude Code activity across multiple working directories. Two kinds of evidence are provided per project, grouped by cwd:
+
+  1. \`### Commits in window\` — git log oneline for the project's repo within the time window. This is GROUND TRUTH for what shipped.
+  2. \`--- session ... ---\` — verbatim tails (last N messages) from agent sessions. These are biased toward end-of-session framings — open threads, "next-step" notes, things-to-revisit. They reflect what was top-of-mind at session close, NOT necessarily what's actually pending now.
+
+When commits and session tails conflict, trust commits. If a session tail says "next up: X" but a later commit message describes finishing X, X shipped. If commits show meaningful work that the tails don't recap, surface it from the commits.
 
 Produce a project-by-project narrative. For each project that had real activity:
   - One header line: "**<short project name>**" (derive from the cwd path; just the basename)
-  - 2–4 sentences: what was being worked on, what landed, anything open or pending
+  - 2–4 sentences: what was being worked on, what landed (cite commit evidence), anything genuinely open or pending (not just "noted for later")
 
-Skip projects with only trivial activity. Do not restate session IDs or timestamps. No preamble, no closing summary. Voice: direct, daily-standup register — what changed, what's next.`;
+Skip projects with only trivial activity. Do not restate session IDs, commit hashes, or timestamps. No preamble, no closing summary. Voice: direct, daily-standup register — what changed, what's next.`;
 
 const DURATION_RE = /(\d+)([smhd])/g;
 
@@ -143,6 +154,30 @@ function renderTail(messages: Message[], byteCap: number): string {
   return out;
 }
 
+/**
+ * Render a project's git commits into a compact block, byte-capped. Newest-first.
+ * Returns empty string when there are no commits or the repo can't be read.
+ */
+function renderCommitBlock(commits: GitCommitSummary[], byteCap: number): string {
+  if (commits.length === 0) return '';
+  const lines: string[] = ['### Commits in window'];
+  let included = 0;
+  let bytes = Buffer.byteLength(lines[0] + '\n', 'utf-8');
+  for (const c of commits) {
+    const line = `  ${c.hash.slice(0, 8)} ${c.subject}`;
+    const bn = Buffer.byteLength(line + '\n', 'utf-8');
+    if (bytes + bn > byteCap && included > 0) {
+      const remaining = commits.length - included;
+      if (remaining > 0) lines.push(`  (+${remaining} more commits)`);
+      break;
+    }
+    lines.push(line);
+    bytes += bn;
+    included += 1;
+  }
+  return lines.join('\n') + '\n';
+}
+
 export async function standup(opts: StandupOptions): Promise<StandupResult> {
   const out = opts.out ?? process.stdout;
   // 7d default: a project rhythm window, not an "in the last few hours"
@@ -152,6 +187,8 @@ export async function standup(opts: StandupOptions): Promise<StandupResult> {
   const turnsPerSession = opts.turnsPerSession ?? 10;
   const bytesPerSession = opts.bytesPerSession ?? 1500;
   const totalBytes = opts.totalBytes ?? 60000;
+  const bytesPerCommitBlock = opts.bytesPerCommitBlock ?? 800;
+  const commitsPerProject = opts.commitsPerProject ?? 30;
   const maxSessions = opts.maxSessions ?? 80;
   const liveWindowMs = opts.liveSessionWindowMs ?? 60_000;
   const includeCurrent = opts.includeCurrent ?? false;
@@ -242,6 +279,14 @@ export async function standup(opts: StandupOptions): Promise<StandupResult> {
 
   for (const p of projectSections) {
     const header = `## ${p.cwd}\n`;
+
+    // Pull commits for this project, time-windowed. isGitRepo guards against
+    // synthetic cwd fallbacks (e.g. derived dashy-name paths) and non-git dirs.
+    const commits = isGitRepo(p.cwd)
+      ? getCommitsSince(p.cwd, new Date(cutoff), commitsPerProject)
+      : [];
+    const commitBlock = renderCommitBlock(commits, bytesPerCommitBlock);
+
     let sectionBody = '';
     let sessionCount = 0;
     let messageCount = 0;
@@ -250,7 +295,8 @@ export async function standup(opts: StandupOptions): Promise<StandupResult> {
       const block = `--- session ${s.sessionId.slice(0, 8)} (last: ${s.lastMessageTime.toISOString()}) ---\n` +
         renderTail(s.messages, bytesPerSession);
       const blockBytes = Buffer.byteLength(block, 'utf-8');
-      if (promptBytes + Buffer.byteLength(header, 'utf-8') + blockBytes > totalBytes && lines.length > 0) {
+      const fixedBytes = Buffer.byteLength(header + commitBlock, 'utf-8');
+      if (promptBytes + fixedBytes + blockBytes > totalBytes && lines.length > 0) {
         break;
       }
       sectionBody += block + '\n';
@@ -260,13 +306,18 @@ export async function standup(opts: StandupOptions): Promise<StandupResult> {
 
     if (sessionCount === 0) continue;
 
-    const section = header + sectionBody;
+    const section = header + commitBlock + sectionBody;
     const sectionBytes = Buffer.byteLength(section, 'utf-8');
     if (promptBytes + sectionBytes > totalBytes && lines.length > 0) break;
 
     lines.push(section);
     promptBytes += sectionBytes;
-    projectsMeta.push({ cwd: p.cwd, sessionCount, messageCount });
+    projectsMeta.push({
+      cwd: p.cwd,
+      sessionCount,
+      messageCount,
+      commitCount: commits.length,
+    });
   }
 
   const promptBody = lines.join('\n');

@@ -168,6 +168,47 @@ export function getLatestGitCommitDate(repoPath: string): Date | null {
     }
 }
 
+export interface GitCommitSummary {
+    hash: string;
+    subject: string;
+    timestamp: Date;
+    author: string;
+}
+
+/**
+ * Time-windowed compact commit list for a repo. Used by standup to give the LLM
+ * a ground-truth view of what shipped, alongside session tails that bias toward
+ * end-of-session framings. Returns newest-first; empty array on any error.
+ */
+export function getCommitsSince(
+    repoPath: string,
+    since: Date,
+    limit: number = 50
+): GitCommitSummary[] {
+    try {
+        const output = execSync(
+            `git -C "${repoPath}" log -n ${limit} --since="${since.toISOString()}" --pretty=format:"%H|%at|%an|%s"`,
+            { encoding: 'utf-8' }
+        );
+        if (!output.trim()) return [];
+        const commits: GitCommitSummary[] = [];
+        for (const line of output.split('\n')) {
+            const parts = line.split('|');
+            if (parts.length < 4) continue;
+            const [hash, at, author, ...rest] = parts;
+            commits.push({
+                hash,
+                timestamp: new Date(parseInt(at, 10) * 1000),
+                author,
+                subject: rest.join('|'),
+            });
+        }
+        return commits;
+    } catch {
+        return [];
+    }
+}
+
 // ============================================================================
 // Intelligent Design Integration
 // ============================================================================

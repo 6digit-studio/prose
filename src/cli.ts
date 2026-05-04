@@ -1817,8 +1817,13 @@ program
       process.exit(1);
     }
 
-    const projectList = result.projects.map(p => `${p.cwd} (${p.sessionCount}s/${p.messageCount}m)`).join(', ');
-    const trail = `\n# standup: ${result.sessionsIncluded} session(s) across ${result.projects.length} project(s), ${result.promptBytes} bytes in — ${projectList}\n`;
+    const projectList = result.projects.map(p => `${p.cwd} (${p.sessionCount}s/${p.messageCount}m/${p.commitCount}c)`).join(', ');
+    // Headers in the LLM output match the system prompt's "**<short project name>**" format.
+    // Counting them keeps the trail honest when the model splits one cwd into multiple
+    // project sections (e.g. a 6digit-studio terminal that touched sibling repos).
+    const sectionCount = (result.text.match(/^\*\*[^*\n]+\*\*\s*$/gm) ?? []).length;
+    const totalCommits = result.projects.reduce((sum, p) => sum + p.commitCount, 0);
+    const trail = `\n# standup: ${result.sessionsIncluded} session(s), ${totalCommits} commit(s), ${result.projects.length} cwd(s) in → ${sectionCount} project(s) out, ${result.promptBytes} prompt bytes — ${projectList}\n`;
     process.stderr.write(trail);
   });
 
