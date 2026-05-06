@@ -161,8 +161,13 @@ export function matchBrainToProject(brainPath: string, projectFilter: string): b
  */
 export function getLatestGitCommitDate(repoPath: string): Date | null {
     try {
-        const output = execSync(`git -C "${repoPath}" log -1 --format=%at`, { encoding: 'utf-8' });
-        return new Date(parseInt(output.trim(), 10) * 1000);
+        const output = execSync(`git -C "${repoPath}" log -1 --format=%at`, {
+            encoding: 'utf-8',
+            stdio: ['ignore', 'pipe', 'ignore'],
+        });
+        const ts = parseInt(output.trim(), 10);
+        if (!Number.isFinite(ts)) return null;
+        return new Date(ts * 1000);
     } catch {
         return null;
     }

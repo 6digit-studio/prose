@@ -5,6 +5,18 @@ All notable changes to `@6digit/prose` are documented here.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project follows [Semantic Versioning](https://semver.org/), with the caveat that pre-1.0 minor bumps may include breaking changes.
 
+## [0.6.1] — 2026-05-06
+
+### Changed
+
+- **Neighborhood resolver gates siblings on recent git activity.** Non-self matches must have a git commit within the last 14 days to stay in the family; non-git or commit-less repos are dropped. Self always passes through.
+- `NeighborhoodOptions.maxAgeMs` is the new knob (default `14 * 86_400_000`; pass `Infinity` to disable).
+- `getLatestGitCommitDate` no longer leaks `fatal: not a git repository` to stderr when probing non-git siblings.
+
+### Rationale
+
+Pure name-based matching pulled in coincidental siblings — `caption-studio`, `beist-studio`, `koru-studio` were appearing in the `6digit-studio` neighborhood because they shared the generic `studio` suffix, even though they live in unrelated project families and hadn't been touched in months. The IDF weighting alone wasn't enough to suppress generic suffix tokens. A recency gate is cheap (one `git log -1` per candidate), self-cleaning (no hand-curated stoplist to rot), and cuts the resolved family from 21 repos to 3–4 in the typical case — sharpening `whisper` and `gossip` output without changing their public surface.
+
 ## [0.6.0] — 2026-05-04
 
 ### Added

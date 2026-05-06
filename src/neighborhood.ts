@@ -10,16 +10,25 @@
  *      tokens (e.g. `6digit`, `koru`) are strong signal; common tokens
  *      (e.g. `test`, `app`) approach zero
  *   4. Sum scores per sibling; include those above a threshold
+ *   5. Gate the survivors on recency — siblings whose latest git commit is
+ *      older than `maxAgeMs` (default 14d) are dropped. A name match without
+ *      recent activity is almost always coincidence (`caption-studio` and
+ *      `koru-studio` sharing the `studio` suffix with `6digit-studio` but
+ *      living in unrelated project families). Self bypasses the gate.
  *
- * Catches `korulang_org` for `koru`, the full `6digit-*` family for
+ * Catches `korulang_org` for `koru`, the full active `6digit-*` family for
  * `6digit-studio`, etc., without any config or manifest — just by reading
- * the structure the user already encoded into their parent directory.
+ * the structure the user already encoded into their parent directory and
+ * the recency of their git activity.
  */
 
 import { readdirSync, statSync } from 'fs';
 import { dirname, basename, join } from 'path';
 
+import { getLatestGitCommitDate } from './source-parsers.js';
+
 const MIN_TOKEN_LEN = 3;
+const DEFAULT_MAX_AGE_MS = 14 * 86_400_000; // 14 days
 
 export interface NeighborhoodEntry {
   /** Absolute path to the sibling repo directory. */
@@ -44,6 +53,13 @@ export interface NeighborhoodOptions {
   minScore?: number;
   /** Cap the neighborhood size (after self). Default 30. */
   maxSiblings?: number;
+  /**
+   * Recency gate: drop non-self siblings whose latest git commit is older
+   * than this many ms (or whose commit date is unreadable — non-git or
+   * empty repos). Self bypasses the gate. Default 14 days. Pass `Infinity`
+   * to disable.
+   */
+  maxAgeMs?: number;
 }
 
 /**
@@ -85,6 +101,8 @@ export function resolveNeighborhood(
 ): NeighborhoodEntry[] {
   const minScore = opts.minScore ?? 0.05;
   const maxSiblings = opts.maxSiblings ?? 30;
+  const maxAgeMs = opts.maxAgeMs ?? DEFAULT_MAX_AGE_MS;
+  const recencyCutoff = Number.isFinite(maxAgeMs) ? Date.now() - maxAgeMs : -Infinity;
 
   const parent = dirname(cwd);
   const selfName = basename(cwd);
@@ -150,11 +168,21 @@ export function resolveNeighborhood(
     });
   }
 
-  // Self first, then non-self by descending score, threshold + cap applied
-  // only to non-self entries.
+  // Self first, then non-self by descending score, threshold + cap + recency
+  // gate applied only to non-self entries. The recency gate is what drops
+  // name-coincidence siblings from unrelated families (e.g. `caption-studio`
+  // matching `6digit-studio` on the generic `studio` suffix); a name match
+  // without recent commits is almost always coincidence.
   const self = scored.find((s) => s.isSelf);
   const others = scored
-    .filter((s) => !s.isSelf && s.score >= minScore)
+    .filter((s) => {
+      if (s.isSelf) return false;
+      if (s.score < minScore) return false;
+      if (!Number.isFinite(maxAgeMs)) return true;
+      const lastCommit = getLatestGitCommitDate(s.path);
+      if (!lastCommit) return false;
+      return lastCommit.getTime() >= recencyCutoff;
+    })
     .sort((a, b) => b.score - a.score)
     .slice(0, maxSiblings);
 
