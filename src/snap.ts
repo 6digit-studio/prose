@@ -12,6 +12,10 @@ import {
   discoverCodexSessionFiles,
   parseCodexSessionFile,
 } from './codex-session-parser.js';
+import {
+  discoverOpencodeSessionFiles,
+  parseOpencodeSessionFile,
+} from './opencode-session-parser.js';
 
 export interface SnapOptions {
   cwd?: string;
@@ -85,6 +89,7 @@ export function snap(opts: SnapOptions = {}): SnapResult {
   // primary scan AND the misfiled-session secondary scan.
   const claudeFiles = discoverSessionFiles(cwd, cwd);
   const codexFiles = discoverCodexSessionFiles(cwd);
+  const opencodeFiles = discoverOpencodeSessionFiles(cwd);
   const now = Date.now();
 
   // Parse a wider set of candidates than maxSessions so we can re-sort by
@@ -96,6 +101,7 @@ export function snap(opts: SnapOptions = {}): SnapResult {
   const candidatePool = [
     ...claudeFiles.slice(0, perSourceCap),
     ...codexFiles.slice(0, perSourceCap),
+    ...opencodeFiles.slice(0, perSourceCap),
   ].sort((a, b) => b.modifiedTime.getTime() - a.modifiedTime.getTime());
 
   type Parsed = {
@@ -108,7 +114,11 @@ export function snap(opts: SnapOptions = {}): SnapResult {
   const parsed: Parsed[] = [];
   for (const f of candidatePool) {
     const conv =
-      f.sourceType === 'codex' ? parseCodexSessionFile(f.path) : parseSessionFile(f.path);
+      f.sourceType === 'codex'
+        ? parseCodexSessionFile(f.path)
+        : f.sourceType === 'opencode'
+        ? parseOpencodeSessionFile(f.path)
+        : parseSessionFile(f.path);
     if (conv.messages.length === 0) continue;
     const lastMessageTime = conv.messages[conv.messages.length - 1].timestamp;
     const contentAgeMs = now - lastMessageTime.getTime();
@@ -131,7 +141,12 @@ export function snap(opts: SnapOptions = {}): SnapResult {
     }
 
     const tail = p.conv.messages.slice(-turnsPerSession);
-    const sourceLabel = p.file.sourceType === 'codex' ? 'Codex' : 'Claude Code';
+    const sourceLabel =
+      p.file.sourceType === 'codex'
+        ? 'Codex'
+        : p.file.sourceType === 'opencode'
+        ? 'opencode'
+        : 'Claude Code';
     const block = renderSessionBlock(
       p.conv.sessionId,
       sourceLabel,

@@ -5,6 +5,19 @@ All notable changes to `@6digit/prose` are documented here.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project follows [Semantic Versioning](https://semver.org/), with the caveat that pre-1.0 minor bumps may include breaking changes.
 
+## [0.7.0] — 2026-05-06
+
+### Added
+
+- **opencode (sst/opencode) source.** All four verbs (`snap`, `whisper`, `gossip`, `standup`) now read opencode sessions alongside Claude Code, ACP, and Codex. opencode stores conversation data in SQLite at `~/.local/share/opencode/opencode.db` (tables: `session`, `message`, `part`); the parser shells out to the `sqlite3` CLI to discover sessions by `directory` (cwd) and assemble per-message visible text from `text`-typed parts (skipping reasoning, tool calls, and step-bookkeeping events).
+- New `'opencode'` member of the `SourceType` union.
+- `discoverOpencodeSessionFiles(projectPath?)` and `parseOpencodeSessionFile(syntheticPath)` exports. Synthetic paths use the `opencode://ses_xxx` scheme since opencode is db-backed rather than file-backed.
+- Output labels render as `=== opencode session ses_xxx (...) ===` to disambiguate from Claude Code and Codex blocks.
+
+### Rationale
+
+opencode is the most prose-shaped non-Anthropic harness in the wild — same "agent-with-tools writing turn pairs to disk" model, just SQLite-backed instead of JSONL. Adding it costs ~190 lines and unlocks the entire opencode user base. Failure is silent: users without opencode installed get an empty discovery and never notice the source exists, mirroring how Codex behaves when `~/.codex` is missing.
+
 ## [0.6.1] — 2026-05-06
 
 ### Changed

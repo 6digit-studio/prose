@@ -72,8 +72,9 @@ All four verbs read the **union** of:
 - Claude Code CLI sessions in `~/.claude/projects/`
 - Brain-persona ACP sessions (claude-agent-acp writes the same JSONL format to the same path)
 - Codex CLI sessions in `~/.codex/sessions/`
+- opencode (sst/opencode) sessions in `~/.local/share/opencode/opencode.db` (SQLite)
 
-A `gossip` in a directory automatically picks up what your terminal CLI, ACP-driven brain personas, and Codex have all been doing there. The boundary between surfaces mostly disappears at the inspection layer.
+A `gossip` in a directory automatically picks up what your terminal CLI, ACP-driven brain personas, Codex, and opencode have all been doing there. The boundary between surfaces mostly disappears at the inspection layer. Sources you don't use are silently no-ops — no config to disable.
 
 ## Stateless — call it freely
 

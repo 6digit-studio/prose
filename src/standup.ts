@@ -17,6 +17,10 @@ import {
   discoverCodexSessionFiles,
   parseCodexSessionFile,
 } from './codex-session-parser.js';
+import {
+  discoverOpencodeSessionFiles,
+  parseOpencodeSessionFile,
+} from './opencode-session-parser.js';
 import { isGitRepo, getCommitsSince, type GitCommitSummary } from './source-parsers.js';
 
 export interface StandupOptions {
@@ -196,18 +200,19 @@ export async function standup(opts: StandupOptions): Promise<StandupResult> {
   const cutoff = Date.now() - windowMs;
   const claudeFiles = discoverSessionFiles();
   const codexFiles = discoverCodexSessionFiles();
+  const opencodeFiles = discoverOpencodeSessionFiles();
   // No per-source cap here: standup is already time-windowed by mtime, so
-  // Claude Code can't structurally crowd Codex out the way snap's flat
-  // candidate slice did. Sort by mtime, drop everything below the cutoff
+  // Claude Code can't structurally crowd Codex/opencode out the way snap's
+  // flat candidate slice did. Sort by mtime, drop everything below the cutoff
   // in the parse loop.
-  const allFiles = [...claudeFiles, ...codexFiles].sort(
+  const allFiles = [...claudeFiles, ...codexFiles, ...opencodeFiles].sort(
     (a, b) => b.modifiedTime.getTime() - a.modifiedTime.getTime()
   );
 
   type Kept = {
     cwd: string;
     sessionId: string;
-    sourceType: 'claude-code' | 'codex';
+    sourceType: 'claude-code' | 'codex' | 'opencode';
     messages: Message[];
     lastMessageTime: Date;
   };
@@ -220,8 +225,12 @@ export async function standup(opts: StandupOptions): Promise<StandupResult> {
       // the parse safely — content time is bounded above by mtime for append-only logs.
       continue;
     }
-    const isCodex = f.sourceType === 'codex';
-    const conv = isCodex ? parseCodexSessionFile(f.path) : parseSessionFile(f.path);
+    const conv =
+      f.sourceType === 'codex'
+        ? parseCodexSessionFile(f.path)
+        : f.sourceType === 'opencode'
+        ? parseOpencodeSessionFile(f.path)
+        : parseSessionFile(f.path);
     if (conv.messages.length === 0) continue;
     const last = conv.messages[conv.messages.length - 1];
     // Window controls inclusion (did this session do anything recently?),
@@ -232,11 +241,21 @@ export async function standup(opts: StandupOptions): Promise<StandupResult> {
     if (!includeCurrent && Date.now() - last.timestamp.getTime() < liveWindowMs) continue;
 
     const tail = conv.messages.slice(-turnsPerSession);
-    const cwd = f.cwd ?? readSessionCwd(f.path, f.project);
+    // For opencode, the synthetic path has no cwd encoded; the SessionFile.cwd
+    // populated at discovery is authoritative. readSessionCwd's first-line
+    // JSONL probe doesn't apply.
+    const cwd =
+      f.cwd ??
+      (f.sourceType === 'opencode' ? '/' : readSessionCwd(f.path, f.project));
     kept.push({
       cwd,
       sessionId: conv.sessionId,
-      sourceType: isCodex ? 'codex' : 'claude-code',
+      sourceType:
+        f.sourceType === 'codex'
+          ? 'codex'
+          : f.sourceType === 'opencode'
+          ? 'opencode'
+          : 'claude-code',
       messages: tail,
       lastMessageTime: last.timestamp,
     });
