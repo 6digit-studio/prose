@@ -51,6 +51,13 @@ export interface Conversation {
   startTime: Date;
   endTime: Date;
   processedBytes: number;
+  /**
+   * The Claude Code entrypoint that launched this session. `'cli'` means an
+   * interactive terminal session; `'sdk-cli'` means a one-shot SDK invocation
+   * (Claude Code's internal automation: commit-message generation, summaries,
+   * subagents). Undefined for Codex / opencode / pre-entrypoint sessions.
+   */
+  entrypoint?: string;
 }
 
 export type SourceType = 'claude-code' | 'git' | 'antigravity' | 'codex' | 'opencode';
@@ -84,6 +91,7 @@ interface RawUserMessage {
   sessionId: string;
   cwd?: string;
   project?: string;
+  entrypoint?: string;
 }
 
 interface RawAssistantMessage {
@@ -269,6 +277,7 @@ export function parseSessionFile(filePath: string): Conversation {
   const messages: Message[] = [];
   let sessionId = '';
   let project = '';
+  let entrypoint: string | undefined;
   let lastSuccessfulOffset = 0;
   let currentOffset = 0;
 
@@ -288,6 +297,7 @@ export function parseSessionFile(filePath: string): Conversation {
         if (parsed.type !== 'file-history-snapshot') {
           if (!sessionId && 'sessionId' in parsed) sessionId = parsed.sessionId;
           if (!project && 'cwd' in parsed && parsed.cwd) project = `-${sanitizePath(parsed.cwd)}`;
+          if (!entrypoint && parsed.type === 'user' && parsed.entrypoint) entrypoint = parsed.entrypoint;
 
           if (parsed.type === 'user') {
             const text = extractTextContent(parsed.message.content);
@@ -335,6 +345,7 @@ export function parseSessionFile(filePath: string): Conversation {
     startTime: messages[0]?.timestamp || new Date(),
     endTime: messages[messages.length - 1]?.timestamp || new Date(),
     processedBytes: lastSuccessfulOffset,
+    entrypoint,
   };
 }
 

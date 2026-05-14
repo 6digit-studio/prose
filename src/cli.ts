@@ -4,7 +4,8 @@
  *
  * Commands:
  *   evolve   - Process sessions and evolve fragments
- *   search   - Semantic search through memory (alias: grep)
+ *   search   - Semantic search through memory
+ *   grep     - Verbatim regex search across parsed agent sessions
  *   status   - Show memory statistics
  *   show     - Display current fragments for a project
  */
@@ -63,7 +64,9 @@ import { addFragment, detectProject, type FragmentType } from './add.js';
 import { snap } from './snap.js';
 import { whisper } from './whisper.js';
 import { gossip } from './gossip.js';
-import { standup } from './standup.js';
+import { standup, parseDuration } from './standup.js';
+import { grep } from './grep.js';
+import type { SourceType } from './session-parser.js';
 import * as logger from './logger.js';
 
 const program = new Command();
@@ -1119,7 +1122,6 @@ program
 
 program
   .command('search <query>')
-  .alias('grep')
   .description('Semantic search through evolved memory')
   .option('-p, --project <name>', 'Filter to specific project (auto-detects from cwd if not specified)')
   .option('-a, --all', 'Search all projects (ignore cwd auto-detection)')
@@ -1630,7 +1632,9 @@ program
   .option('--bytes <n>', 'Byte budget for assembled text (default 4000)', (v) => parseInt(v, 10))
   .option('--turns <n>', 'Last N messages per session (default 4)', (v) => parseInt(v, 10))
   .option('--sessions <n>', 'Max sessions to include (default 5)', (v) => parseInt(v, 10))
+  .option('--max-message-bytes <n>', 'Per-message byte cap; long messages get truncated with [N bytes elided] (default 1500, 0 disables)', (v) => parseInt(v, 10))
   .option('--include-current', 'Include the actively-written session (default skipped)')
+  .option('--include-sdk-cli', 'Include sdk-cli sessions (Claude Code automation: commit-message generators, etc. — noise by default)')
   .option('--cwd <path>', 'Override current working directory')
   .option('--json', 'Emit JSON with metadata instead of plain text')
   .action((options) => {
@@ -1639,7 +1643,9 @@ program
       bytes: options.bytes,
       turnsPerSession: options.turns,
       maxSessions: options.sessions,
+      maxMessageBytes: options.maxMessageBytes,
       includeCurrent: options.includeCurrent === true,
+      includeSdkCli: options.includeSdkCli === true,
     });
 
     if (options.json) {
@@ -1667,7 +1673,9 @@ program
   .option('--bytes <n>', 'Byte budget for the assembled verbatim text (default 4000)', (v) => parseInt(v, 10))
   .option('--turns <n>', 'Last N messages per session (default 4)', (v) => parseInt(v, 10))
   .option('--sessions <n>', 'Max sessions to include per repo (default: 5 for self, 2 for siblings)', (v) => parseInt(v, 10))
+  .option('--max-message-bytes <n>', 'Per-message byte cap; long messages get truncated with [N bytes elided] (default 1500, 0 disables)', (v) => parseInt(v, 10))
   .option('--include-current', 'Include the actively-written session (default skipped)')
+  .option('--include-sdk-cli', 'Include sdk-cli sessions (Claude Code automation: commit-message generators, etc. — noise by default)')
   .option('--cwd <path>', 'Override current working directory')
   .option('--cwd-only', 'Skip neighborhood expansion — collect only this cwd (no sibling repos)')
   .option('--json', 'Emit JSON with metadata + per-member blocks instead of plain text')
@@ -1677,7 +1685,9 @@ program
       bytes: options.bytes,
       turnsPerSession: options.turns,
       maxSessions: options.sessions,
+      maxMessageBytes: options.maxMessageBytes,
       includeCurrent: options.includeCurrent === true,
+      includeSdkCli: options.includeSdkCli === true,
       cwdOnly: options.cwdOnly === true,
     });
 
@@ -1770,9 +1780,10 @@ program
   .option('--since <duration>', 'Time window for session inclusion: e.g. 30m, 4h, 1d, 2h30m (default 7d). Window decides which sessions to surface; per-session tail length is independent.')
   .option('--turns <n>', "Last N messages per session — taken from the session's overall tail, not the in-window slice (default 10)", (v) => parseInt(v, 10))
   .option('--bytes-per-session <n>', 'Per-session byte cap on rendered tail (default 1500)', (v) => parseInt(v, 10))
-  .option('--total-bytes <n>', 'Total byte cap on assembled LLM input (default 60000)', (v) => parseInt(v, 10))
+  .option('--total-bytes <n>', 'Total byte cap on assembled LLM input (default 2000000)', (v) => parseInt(v, 10))
   .option('--sessions <n>', 'Max sessions across all projects (default 80)', (v) => parseInt(v, 10))
   .option('--include-current', 'Include the actively-written session (default skipped)')
+  .option('--include-sdk-cli', 'Include sdk-cli sessions (Claude Code automation: commit-message generators, etc. — noise by default)')
   .option('--model <model>', 'Override the LLM model (default google/gemini-3-flash-preview)')
   .option('--api-key <key>', 'Override the LLM API key')
   .option('--json', 'Emit JSON with metadata + full text instead of streaming to stdout')
@@ -1800,6 +1811,7 @@ program
         totalBytes: options.totalBytes,
         maxSessions: options.sessions,
         includeCurrent: options.includeCurrent === true,
+        includeSdkCli: options.includeSdkCli === true,
         out: sink,
       });
     } catch (err) {
@@ -1824,6 +1836,85 @@ program
     const sectionCount = (result.text.match(/^\*\*[^*\n]+\*\*\s*$/gm) ?? []).length;
     const totalCommits = result.projects.reduce((sum, p) => sum + p.commitCount, 0);
     const trail = `\n# standup: ${result.sessionsIncluded} session(s), ${totalCommits} commit(s), ${result.projects.length} cwd(s) in → ${sectionCount} project(s) out, ${result.promptBytes} prompt bytes — ${projectList}\n`;
+    process.stderr.write(trail);
+  });
+
+// ============================================================================
+// grep - Regex search across the parsed session line-stream (no LLM)
+// ============================================================================
+
+program
+  .command('grep <pattern...>')
+  .description('Regex search across recent agent session text (Claude Code CLI, ACP, Codex, opencode). Operates on parsed session content — NOT files on disk. Multiple patterns OR-alternate. Output is grep-style with line numbers and ±N context lines.')
+  .option('-C, --context <n>', 'Lines before and after each match (default 5)', (v) => parseInt(v, 10))
+  .option('-A, --after <n>', 'Lines after each match (overrides --context for after)', (v) => parseInt(v, 10))
+  .option('-B, --before <n>', 'Lines before each match (overrides --context for before)', (v) => parseInt(v, 10))
+  .option('-i, --ignore-case', 'Case-insensitive matching')
+  .option('-F, --fixed-strings', 'Treat patterns as literal strings, not regex')
+  .option('-m, --max-matches <n>', 'Cap on total matches across all sessions (default 50)', (v) => parseInt(v, 10))
+  .option('--max-sessions <n>', 'Cap on sessions scanned (performance guardrail, default 500)', (v) => parseInt(v, 10))
+  .option('--source <type>', 'Restrict to a source: claude-code | codex | opencode (repeatable)', (v: string, prev: string[] = []) => [...prev, v])
+  .option('--cwd <path>', 'Restrict to one cwd (default: all cwds)')
+  .option('--since <duration>', 'Time window for inclusion: e.g. 30m, 4h, 1d, 2h30m (default: all time)')
+  .option('--include-current', 'Include the actively-written claude-code session')
+  .option('--include-sdk-cli', 'Include sdk-cli sessions (Claude Code automation)')
+  .option('--json', 'Emit JSON with structured matches instead of text')
+  .action((patterns: string[], options) => {
+    let sinceMs: number | undefined;
+    if (options.since) {
+      try {
+        sinceMs = parseDuration(options.since);
+      } catch (err) {
+        logger.error(err instanceof Error ? err.message : String(err));
+        process.exit(1);
+      }
+    }
+
+    let sources: SourceType[] | undefined;
+    if (options.source && Array.isArray(options.source)) {
+      const valid: SourceType[] = ['claude-code', 'codex', 'opencode'];
+      const bad = options.source.filter((s: string) => !valid.includes(s as SourceType));
+      if (bad.length > 0) {
+        logger.error(`Unknown --source value(s): ${bad.join(', ')}. Valid: ${valid.join(', ')}.`);
+        process.exit(1);
+      }
+      sources = options.source as SourceType[];
+    }
+
+    let result;
+    try {
+      result = grep({
+        patterns,
+        cwd: options.cwd,
+        sources,
+        fixedStrings: options.fixedStrings === true,
+        ignoreCase: options.ignoreCase === true,
+        context: options.context,
+        before: options.before,
+        after: options.after,
+        sinceMs,
+        maxMatches: options.maxMatches,
+        maxSessions: options.maxSessions,
+        includeCurrent: options.includeCurrent === true,
+        includeSdkCli: options.includeSdkCli === true,
+      });
+    } catch (err) {
+      logger.error(err instanceof Error ? err.message : String(err));
+      process.exit(1);
+    }
+
+    if (options.json) {
+      process.stdout.write(JSON.stringify(result, null, 2) + '\n');
+      return;
+    }
+
+    if (result.matches.length === 0) {
+      process.stderr.write(`No matches for ${JSON.stringify(patterns)} across ${result.sessionsScanned} session(s).\n`);
+      process.exit(1);
+    }
+
+    process.stdout.write(result.text);
+    const trail = `\n# grep: ${result.matches.length} match group(s), ${result.totalMatchesBeforeCap} match line(s), ${result.sessionsWithMatches}/${result.sessionsScanned} session(s)${result.truncated ? ' (truncated by cap)' : ''}\n`;
     process.stderr.write(trail);
   });
 

@@ -46,6 +46,12 @@ export interface StandupOptions {
   liveSessionWindowMs?: number;
   /** Include the actively-written session. Default false. */
   includeCurrent?: boolean;
+  /**
+   * Include `entrypoint: 'sdk-cli'` Claude Code sessions. These are one-shot
+   * SDK invocations (commit-message generation, summaries, subagents) — noise
+   * for orientation. Default false.
+   */
+  includeSdkCli?: boolean;
   /** Stream destination. Defaults to process.stdout. */
   out?: NodeJS.WritableStream;
 }
@@ -109,7 +115,7 @@ export function parseDuration(input: string): number {
  * Falls back to deriving a path from the project dir name if no line yields one,
  * which is lossy when basenames contain dashes — the JSONL cwd is authoritative.
  */
-function readSessionCwd(filePath: string, projectDirName: string): string {
+export function readSessionCwd(filePath: string, projectDirName: string): string {
   try {
     const fd = openSync(filePath, 'r');
     const buf = Buffer.alloc(16384);
@@ -190,12 +196,13 @@ export async function standup(opts: StandupOptions): Promise<StandupResult> {
   const windowMs = parseDuration(opts.since ?? '7d');
   const turnsPerSession = opts.turnsPerSession ?? 10;
   const bytesPerSession = opts.bytesPerSession ?? 1500;
-  const totalBytes = opts.totalBytes ?? 60000;
+  const totalBytes = opts.totalBytes ?? 2_000_000;
   const bytesPerCommitBlock = opts.bytesPerCommitBlock ?? 800;
   const commitsPerProject = opts.commitsPerProject ?? 30;
   const maxSessions = opts.maxSessions ?? 80;
   const liveWindowMs = opts.liveSessionWindowMs ?? 60_000;
   const includeCurrent = opts.includeCurrent ?? false;
+  const includeSdkCli = opts.includeSdkCli ?? false;
 
   const cutoff = Date.now() - windowMs;
   const claudeFiles = discoverSessionFiles();
@@ -232,6 +239,7 @@ export async function standup(opts: StandupOptions): Promise<StandupResult> {
         ? parseOpencodeSessionFile(f.path)
         : parseSessionFile(f.path);
     if (conv.messages.length === 0) continue;
+    if (!includeSdkCli && conv.entrypoint === 'sdk-cli') continue;
     const last = conv.messages[conv.messages.length - 1];
     // Window controls inclusion (did this session do anything recently?),
     // not which messages we surface. A session that drifted into the window

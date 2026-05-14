@@ -1,6 +1,6 @@
 ---
 name: prose
-description: ALWAYS CHECK FIRST when you need to orient on recent work. `prose` is a stateless CLI that reads agent session journals (Claude Code CLI, ACP, Codex). Two read verbs (`snap`, `whisper`) are pure-verbatim; two compaction verbs (`gossip`, `standup`) layer one cheap LLM pass on top. Don't say "I don't remember" or guess from filenames before running prose. Also fire when the user mentions prose itself ("look at prose", "show me prose", "does prose work", "try prose") — default to `snap`, never dump `--help` and ask what to do.
+description: ALWAYS CHECK FIRST when you need to orient on recent work or find a specific thing said in a past session. `prose` is a stateless CLI that reads agent session journals (Claude Code CLI, ACP, Codex). Three read verbs (`snap`, `whisper`, `grep`) are pure-verbatim; two compaction verbs (`gossip`, `standup`) layer one cheap LLM pass on top. Don't say "I don't remember" or guess from filenames before running prose. Use `grep` when the user references a specific phrase, term, file, or quote from a past session. Also fire when the user mentions prose itself ("look at prose", "show me prose", "does prose work", "try prose") — default to `snap`, never dump `--help` and ask what to do.
 ---
 
 # prose — Stateless Inspection Over Your Agent Journal
@@ -12,6 +12,7 @@ description: ALWAYS CHECK FIRST when you need to orient on recent work. `prose` 
 - The user references "earlier," "yesterday," "what we were doing," or assumes shared context you don't have.
 - You're starting a session in a known repo and want to know what happened before.
 - The user asks what they were working on (in this project, the family, or the whole week).
+- The user references a specific term, phrase, error message, or quote from a past session ("the bit about migrations," "where we discussed X") — that's `grep`, not `snap`/`whisper`, since recency-based verbs only see tails.
 - You're tempted to say "I don't have context on that" — check prose first; the data is on disk.
 - You need to feed a recent session into your reasoning without retracing.
 - The user references the prose tool itself ("look at prose", "show me prose", "does prose work", "try prose") — run `snap`, don't dump `--help` and ask what to do. Demonstrating the tool *is* the answer.
@@ -27,13 +28,14 @@ description: ALWAYS CHECK FIRST when you need to orient on recent work. `prose` 
 
 Two axes: **scope** (how wide a net) and **compaction** (verbatim or LLM paragraph).
 
-|                              | verbatim    | LLM compaction |
-|------------------------------|-------------|----------------|
-| 1 cwd                        | `snap`      | —              |
-| neighborhood (project family)| `whisper`   | `gossip`       |
-| all cwds, time-windowed      | —           | `standup`      |
+|                              | verbatim         | LLM compaction |
+|------------------------------|------------------|----------------|
+| 1 cwd                        | `snap`           | —              |
+| neighborhood (project family)| `whisper`        | `gossip`       |
+| all cwds, time-windowed      | —                | `standup`      |
+| all cwds, regex-targeted     | `grep`           | —              |
 
-Read verbs (`snap`, `whisper`) are pure — no LLM, no API key, instant, free. Compaction verbs (`gossip`, `standup`) layer one streaming LLM pass on top.
+Read verbs (`snap`, `whisper`, `grep`) are pure — no LLM, no API key, instant, free. Compaction verbs (`gossip`, `standup`) layer one streaming LLM pass on top.
 
 ## Pick the right verb
 
@@ -57,6 +59,13 @@ Read verbs (`snap`, `whisper`) are pure — no LLM, no API key, instant, free. C
 - Formal register — daily-standup tone, "what changed / what's next."
 - Cheap: one LLM pass over a byte-budgeted window.
 
+**`grep`** — Regex search across the parsed session line-stream, no LLM.
+- Use when the user references a specific phrase, file, term, error string, or quote from a past session — when recency-based verbs (`snap`/`whisper`) won't surface it because it's outside the recent tail.
+- Operates on the **parsed session content**, NOT on files on disk. Multiple positional patterns are OR-alternated; output is grep-style line context (default ±5).
+- Default scope is global: all sources, all cwds, all time. Use `--cwd`, `--source`, `--since` to narrow.
+- `-F` for literal strings, `-i` for case-insensitive, `-C N` / `-A N` / `-B N` for context windows, `-m N` to cap matches.
+- Cheap: filesystem read + in-memory regex, zero token spend.
+
 ## Decision tree (rough)
 
 ```
@@ -64,6 +73,7 @@ Need raw text for THIS cwd?               → prose snap
 Need raw text across the project family?  → prose whisper
 Need a paragraph about the family?        → prose gossip
 Need "what did I do this week"?           → prose standup
+Need to find a specific phrase/term/quote? → prose grep "..."
 ```
 
 ## Multi-source by default
@@ -89,16 +99,21 @@ Every verb supports `--json`. The verbatim verbs return structured snap/whisper 
 You have a `Bash` tool. Use it. Don't ask the user to run prose and paste the output — just run it.
 
 ```bash
-prose snap                      # verbatim, current cwd
-prose snap --json --sessions 3  # structured, 3 most recent
-prose whisper                   # verbatim across the project family
-prose whisper --cwd-only        # verbatim, just this directory
-prose whisper --json            # structured neighborhood snap
-prose gossip                    # paragraph over the family
-prose gossip --json             # structured: source whisper + paragraph
-prose standup                   # cross-project standup, last 7 days
-prose standup --since 1d        # tighter window
-prose standup --json            # structured project breakdown + text
+prose snap                                # verbatim, current cwd
+prose snap --json --sessions 3            # structured, 3 most recent
+prose whisper                             # verbatim across the project family
+prose whisper --cwd-only                  # verbatim, just this directory
+prose whisper --json                      # structured neighborhood snap
+prose gossip                              # paragraph over the family
+prose gossip --json                       # structured: source whisper + paragraph
+prose standup                             # cross-project standup, last 7 days
+prose standup --since 1d                  # tighter window
+prose standup --json                      # structured project breakdown + text
+prose grep "vision board"                 # regex search across all sessions
+prose grep -F "tsc --noEmit"              # literal string (no regex)
+prose grep -i "needle" --since 7d -C 3    # case-insensitive, last week, 3 lines context
+prose grep "foo" "bar" --cwd /path/here   # OR-alternation, scoped to one cwd
+prose grep "..." --json                   # structured matches with line numbers
 ```
 
 `prose --help` is the canonical flag reference. Don't memorize defaults — they evolve.
@@ -110,6 +125,8 @@ prose standup --json            # structured project breakdown + text
 - **Skipping it because "I'll just guess."** If you're guessing, you're fabricating. Spend the 2 seconds.
 - **Reaching for `gossip` when you wanted raw text.** Gossip costs LLM tokens for a paragraph. If you're going to feed the result into your own reasoning, use `whisper` and skip the middle compression.
 - **Running `whisper --cwd-only` when the project is part of a family.** Default whisper is the right call ~80% of the time. Use `--cwd-only` only when you genuinely want to ignore siblings.
+- **Reaching for `whisper`/`snap` when the user named a specific term or quote.** If they reference a phrase ("the bit about the vision board," "where I said `tsc --noEmit` was clean"), that's `grep` — recency-based verbs only see the tail. `grep` searches the whole archive.
+- **Treating `prose grep` as a filesystem search.** It's not. It searches the **parsed session content** (Claude Code JSONLs, ACP records, Codex sessions, opencode SQLite). Use ripgrep for files on disk; use `prose grep` for words your agents actually said.
 
 ## Pairing with other skills
 

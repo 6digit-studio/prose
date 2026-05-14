@@ -77,8 +77,10 @@ export function whisper(opts: WhisperOptions = {}): WhisperResult {
       bytes: memberBytes,
       turnsPerSession: opts.turnsPerSession,
       maxSessions: opts.maxSessions ?? (isSelf ? 5 : 2),
+      maxMessageBytes: opts.maxMessageBytes,
       liveSessionWindowMs: opts.liveSessionWindowMs,
       includeCurrent: opts.includeCurrent,
+      includeSdkCli: opts.includeSdkCli,
     });
     if (memberSource.sessionsIncluded === 0) continue;
     blocks.push({ member, source: memberSource });
