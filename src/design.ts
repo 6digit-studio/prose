@@ -22,6 +22,7 @@ export async function startDesignSession(
     const openai = createOpenAI({
         apiKey: config.apiKey,
         baseURL: config.baseUrl || 'https://openrouter.ai/api/v1',
+        headers: { 'X-Title': 'prose' },
     });
 
     const model = openai(config.model || 'google/gemini-3-flash-preview');

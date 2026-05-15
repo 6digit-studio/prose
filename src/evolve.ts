@@ -69,6 +69,7 @@ function createLLMClient(config: EvolutionConfig) {
   return createOpenAI({
     apiKey: config.apiKey,
     baseURL: config.baseUrl || 'https://openrouter.ai/api/v1',
+    headers: { 'X-Title': 'prose' },
   });
 }
 

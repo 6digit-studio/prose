@@ -87,6 +87,7 @@ export async function gossip(opts: GossipOptions): Promise<GossipResult> {
   const client = createOpenAI({
     apiKey: opts.apiKey,
     baseURL: opts.baseUrl || 'https://openrouter.ai/api/v1',
+    headers: { 'X-Title': 'prose' },
   });
 
   const model = client(opts.model || 'google/gemini-3-flash-preview');

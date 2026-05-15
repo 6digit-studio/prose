@@ -352,6 +352,7 @@ export async function standup(opts: StandupOptions): Promise<StandupResult> {
   const client = createOpenAI({
     apiKey: opts.apiKey,
     baseURL: opts.baseUrl || 'https://openrouter.ai/api/v1',
+    headers: { 'X-Title': 'prose' },
   });
   const model = client(opts.model || 'google/gemini-3-flash-preview');
 
