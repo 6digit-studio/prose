@@ -1,0 +1,3 @@
+{"type": "user", "uuid": "u1", "sessionId": "cc-session-2", "timestamp": "2026-05-31T11:00:00.000Z", "message": {"role": "user", "content": "Execute list_dir"}}
+{"type": "assistant", "uuid": "a1", "parentUuid": "u1", "sessionId": "cc-session-2", "timestamp": "2026-05-31T11:00:02.000Z", "message": {"role": "assistant", "content": [{"type": "text", "text": "Let me look at the files."}, {"type": "tool_use", "id": "t1", "name": "list_dir", "input": {"DirectoryPath": "/x"}}]}}
+{"type": "user", "uuid": "u2", "sessionId": "cc-session-2", "timestamp": "2026-05-31T11:00:04.000Z", "message": {"role": "user", "content": [{"type": "text", "text": "System reminder: keep comments short."}, {"type": "tool_result", "tool_use_id": "t1", "content": "file1.txt\nfile2.txt"}]}}

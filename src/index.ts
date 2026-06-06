@@ -27,6 +27,28 @@ export {
   getCodexSessionsDir,
 } from './codex-session-parser.js';
 
+// Cursor session parsing
+export {
+  discoverCursorSessionFiles,
+  parseCursorSessionFile,
+  getCursorProjectsDir,
+  decodeCursorCwd,
+} from './cursor-session-parser.js';
+
+// Baton service — prose-native "you are here" markers
+export {
+  setBaton,
+  listBatons,
+  clearBatons,
+  parseBatonLine,
+  renderBatonLine,
+  renderBatonHeader,
+  getBatonStorePath,
+  captureCorrelationKeys,
+  correlationKeysMatch,
+  type Baton,
+} from './baton.js';
+
 // Fragment schemas
 export {
   type AllFragments,

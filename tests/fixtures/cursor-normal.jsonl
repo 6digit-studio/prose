@@ -1,0 +1,5 @@
+{"role":"user","message":{"content":[{"type":"text","text":"Howdy Cursor"}]}}
+{"role":"assistant","message":{"content":[{"type":"text","text":"Hello! Let me look at the files."},{"type":"tool_use","name":"Glob","input":{"pattern":"**/*.ts"}}]}}
+{"role":"assistant","message":{"content":[{"type":"tool_use","name":"Read","input":{"path":"a.ts"}}]}}
+{"role":"user","message":{"content":[{"type":"text","text":"What is the capital of France?"}]}}
+{"role":"assistant","message":{"content":[{"type":"text","text":"The capital of France is Paris."}]}}

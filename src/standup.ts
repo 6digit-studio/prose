@@ -21,6 +21,10 @@ import {
   discoverOpencodeSessionFiles,
   parseOpencodeSessionFile,
 } from './opencode-session-parser.js';
+import {
+  discoverCursorSessionFiles,
+  parseCursorSessionFile,
+} from './cursor-session-parser.js';
 import { isGitRepo, getCommitsSince, type GitCommitSummary } from './source-parsers.js';
 
 export interface StandupOptions {
@@ -208,18 +212,19 @@ export async function standup(opts: StandupOptions): Promise<StandupResult> {
   const claudeFiles = discoverSessionFiles();
   const codexFiles = discoverCodexSessionFiles();
   const opencodeFiles = discoverOpencodeSessionFiles();
+  const cursorFiles = discoverCursorSessionFiles();
   // No per-source cap here: standup is already time-windowed by mtime, so
-  // Claude Code can't structurally crowd Codex/opencode out the way snap's
+  // Claude Code can't structurally crowd the others out the way snap's
   // flat candidate slice did. Sort by mtime, drop everything below the cutoff
   // in the parse loop.
-  const allFiles = [...claudeFiles, ...codexFiles, ...opencodeFiles].sort(
+  const allFiles = [...claudeFiles, ...codexFiles, ...opencodeFiles, ...cursorFiles].sort(
     (a, b) => b.modifiedTime.getTime() - a.modifiedTime.getTime()
   );
 
   type Kept = {
     cwd: string;
     sessionId: string;
-    sourceType: 'claude-code' | 'codex' | 'opencode';
+    sourceType: 'claude-code' | 'codex' | 'opencode' | 'cursor';
     messages: Message[];
     lastMessageTime: Date;
   };
@@ -237,6 +242,8 @@ export async function standup(opts: StandupOptions): Promise<StandupResult> {
         ? parseCodexSessionFile(f.path)
         : f.sourceType === 'opencode'
         ? parseOpencodeSessionFile(f.path)
+        : f.sourceType === 'cursor'
+        ? parseCursorSessionFile(f.path)
         : parseSessionFile(f.path);
     if (conv.messages.length === 0) continue;
     if (!includeSdkCli && conv.entrypoint === 'sdk-cli') continue;
@@ -263,6 +270,8 @@ export async function standup(opts: StandupOptions): Promise<StandupResult> {
           ? 'codex'
           : f.sourceType === 'opencode'
           ? 'opencode'
+          : f.sourceType === 'cursor'
+          ? 'cursor'
           : 'claude-code',
       messages: tail,
       lastMessageTime: last.timestamp,

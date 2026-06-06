@@ -205,6 +205,47 @@ export function getSourceVectorPath(projectName: string): string {
 }
 
 // ============================================================================
+// Chronicle — a live, append-only dev-feed of freeform beats.
+//
+// Deliberately NOT a fragment: chronicle entries live outside AllFragments and
+// are NEVER touched by evolution. Evolution reconciles/compresses/ages-out
+// fragments; a chronicle is the opposite — discrete, timestamped, append-only,
+// never overwritten. The content is a vibe, not a schema; the envelope below is
+// the only structure, and exists purely so the log can be stored and rendered
+// as a feed.
+// ============================================================================
+
+export interface ChronicleEntry {
+  ts: string;       // ISO timestamp
+  emoji?: string;
+  title: string;
+  body?: string;
+}
+
+export function getChroniclePath(projectName: string): string {
+  const sanitized = projectName.replace(/[^a-zA-Z0-9-_]/g, '_');
+  return join(getMemoryDir(), 'projects', `${sanitized}.chronicle.json`);
+}
+
+export function loadChronicle(projectName: string): ChronicleEntry[] {
+  const path = getChroniclePath(projectName);
+  if (!existsSync(path)) return [];
+  const raw = readFileSync(path, 'utf-8');
+  return JSON.parse(raw) as ChronicleEntry[];
+}
+
+export function appendChronicleEntry(projectName: string, entry: ChronicleEntry): void {
+  const path = getChroniclePath(projectName);
+  const projectsDir = dirname(path);
+  if (!existsSync(projectsDir)) {
+    mkdirSync(projectsDir, { recursive: true });
+  }
+  const entries = loadChronicle(projectName);
+  entries.push(entry);
+  writeFileSync(path, JSON.stringify(entries, null, 2));
+}
+
+// ============================================================================
 // Loading & Saving
 // ============================================================================
 

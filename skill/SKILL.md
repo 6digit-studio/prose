@@ -1,11 +1,11 @@
 ---
 name: prose
-description: ALWAYS CHECK FIRST when you need to orient on recent work or find a specific thing said in a past session. `prose` is a stateless CLI that reads agent session journals (Claude Code CLI, ACP, Codex). Three read verbs (`snap`, `whisper`, `grep`) are pure-verbatim; two compaction verbs (`gossip`, `standup`) layer one cheap LLM pass on top. Don't say "I don't remember" or guess from filenames before running prose. Use `grep` when the user references a specific phrase, term, file, or quote from a past session. Also fire when the user mentions prose itself ("look at prose", "show me prose", "does prose work", "try prose") — default to `snap`, never dump `--help` and ask what to do.
+description: ALWAYS CHECK FIRST when you need to orient on recent work or find a specific thing said in a past session. `prose` is a near-stateless CLI that reads agent session journals (Claude Code CLI, ACP, Codex, opencode, Cursor). Four read verbs (`snap`, `whisper`, `grep`, `session`) are pure-verbatim; two compaction verbs (`gossip`, `standup`) layer one cheap LLM pass on top; one stateful verb (`baton`) persists "you are here" markers. Don't say "I don't remember" or guess from filenames before running prose. Use `grep` when the user references a specific phrase, term, file, or quote from a past session. Use `session <id>` to drill into a specific session — the ids printed in snap/whisper headers are direct handles. Use `baton set` to leave a sign-off for the next session and `baton` to read the latest. Also fire when the user mentions prose itself ("look at prose", "show me prose", "does prose work", "try prose") — default to `snap`, never dump `--help` and ask what to do.
 ---
 
 # prose — Stateless Inspection Over Your Agent Journal
 
-`prose` is the cheap orientation tool over your AI session history. It reads what your agents (Claude Code CLI, brain personas via ACP, Codex) have already written to disk. It never writes — it's pure read-side. Every call is current; no cursors, no caches, no coordination overhead.
+`prose` is the cheap orientation tool over your AI session history. It reads what your agents (Claude Code CLI, brain personas via ACP, Codex, opencode, Cursor) have already written to disk. The read verbs are pure read-side — every call is current; no cursors, no caches, no coordination overhead. The one exception is `baton`: a deliberately stateful "you are here" marker you write at a sign-off and read back next session (persisted to the `~/.prose` vault, so it syncs across machines).
 
 **Reach for prose when:**
 
@@ -13,6 +13,7 @@ description: ALWAYS CHECK FIRST when you need to orient on recent work or find a
 - You're starting a session in a known repo and want to know what happened before.
 - The user asks what they were working on (in this project, the family, or the whole week).
 - The user references a specific term, phrase, error message, or quote from a past session ("the bit about migrations," "where we discussed X") — that's `grep`, not `snap`/`whisper`, since recency-based verbs only see tails.
+- A prior verb (`snap`, `whisper`, `grep`) surfaced a session id and you want the *whole* session — that's `session <id>`. The 8-char prefix printed in the `=== Claude Code session 72a5eed3 ===` header is the handle.
 - You're tempted to say "I don't have context on that" — check prose first; the data is on disk.
 - You need to feed a recent session into your reasoning without retracing.
 - The user references the prose tool itself ("look at prose", "show me prose", "does prose work", "try prose") — run `snap`, don't dump `--help` and ask what to do. Demonstrating the tool *is* the answer.
@@ -34,8 +35,9 @@ Two axes: **scope** (how wide a net) and **compaction** (verbatim or LLM paragra
 | neighborhood (project family)| `whisper`        | `gossip`       |
 | all cwds, time-windowed      | —                | `standup`      |
 | all cwds, regex-targeted     | `grep`           | —              |
+| 1 session by id              | `session`        | —              |
 
-Read verbs (`snap`, `whisper`, `grep`) are pure — no LLM, no API key, instant, free. Compaction verbs (`gossip`, `standup`) layer one streaming LLM pass on top.
+Read verbs (`snap`, `whisper`, `grep`, `session`) are pure — no LLM, no API key, instant, free. Compaction verbs (`gossip`, `standup`) layer one streaming LLM pass on top.
 
 ## Pick the right verb
 
@@ -66,6 +68,13 @@ Read verbs (`snap`, `whisper`, `grep`) are pure — no LLM, no API key, instant,
 - `-F` for literal strings, `-i` for case-insensitive, `-C N` / `-A N` / `-B N` for context windows, `-m N` to cap matches.
 - Cheap: filesystem read + in-memory regex, zero token spend.
 
+**`session <id>`** — Verbatim readout of one specific session, no LLM.
+- The drill-down companion to snap/whisper/grep. When those verbs print `=== Claude Code session 72a5eed3 ===`, pass that prefix (or any unique prefix) to `prose session 72a5eed3` to read the whole session.
+- Accepts any unambiguous id prefix; errors clearly on no-match (exit 1) or ambiguous-match (exit 2 with the candidate list).
+- No cwd filter — the id is the selector. Scans Claude Code, ACP, Codex, opencode, Cursor, and Gemini Antigravity (the widest id-space of any verb).
+- Knobs: `--turns N` to tail, `--since <iso>` to slice by timestamp, `--max-message-bytes N` (default 0, no clipping — opposite of snap, since named-session means you want the full text).
+- Cheap: filesystem read, zero token spend.
+
 ## Decision tree (rough)
 
 ```
@@ -74,21 +83,34 @@ Need raw text across the project family?  → prose whisper
 Need a paragraph about the family?        → prose gossip
 Need "what did I do this week"?           → prose standup
 Need to find a specific phrase/term/quote? → prose grep "..."
+Have an id from snap/whisper/grep?         → prose session <id>
 ```
 
 ## Multi-source by default
 
-All four verbs read the **union** of:
+`snap`, `whisper`, and `grep` read the **union** of:
 - Claude Code CLI sessions in `~/.claude/projects/`
 - Brain-persona ACP sessions (claude-agent-acp writes the same JSONL format to the same path)
 - Codex CLI sessions in `~/.codex/sessions/`
 - opencode (sst/opencode) sessions in `~/.local/share/opencode/opencode.db` (SQLite)
+- Cursor agent transcripts in `~/.cursor/projects/<cwd>/agent-transcripts/` (JSONL; timestamps synthesized from file mtime, since Cursor records none)
 
-A `gossip` in a directory automatically picks up what your terminal CLI, ACP-driven brain personas, Codex, and opencode have all been doing there. The boundary between surfaces mostly disappears at the inspection layer. Sources you don't use are silently no-ops — no config to disable.
+`session <id>` resolves against that same union **plus** Gemini Antigravity brain artifacts in `~/.gemini/antigravity/brain/` — its id-space is the widest of any verb, so a named id always resolves regardless of source.
+
+A `gossip` in a directory automatically picks up what your terminal CLI, ACP-driven brain personas, Codex, opencode, and Cursor have all been doing there. The boundary between surfaces mostly disappears at the inspection layer. Sources you don't use are silently no-ops — no config to disable.
 
 ## Stateless — call it freely
 
 These verbs hold zero state. There's no "last run," no cursor, no cache. Multiple consumers (terminal, satellite tool, REST endpoint, another Claude session) can call them concurrently and always get a current answer. **Don't worry about whether you should "save" a result for later** — just call again next time you need it.
+
+## Batons — the one stateful verb (leave a sign-off, read it back)
+
+The read verbs reconstruct the past; a **baton** records *where you are now* for the next session to pick up. It's the deliberate exception to statelessness — a small, typed, persisted "you are here" marker.
+
+- **Write one at a sign-off:** `prose baton set "↪ HANDOFF: position — what merged · next: <advisory move> · or pivot"`. The `↪ LABEL:` prefix sets the type; or pass `--type <label>` explicitly. Defaults to the current cwd.
+- **Read the latest:** bare `prose baton` shows the **latest baton per project per type** — "you are here," not a backlog. `--history` for the full trail, `--type <label>`/`--cwd <path>` to scope, `--json` for structured output.
+- **It rides `snap`/`whisper`:** the cwd's latest batons are prepended as a header to orientation output for free (suppress with `snap --no-batons`).
+- **Typed and methodology-agnostic.** A baton's `type` is just a free-form label (`handoff`, `decision`, …). Arbiter-Driven Development's `↪ HANDOFF` is simply `type: handoff` — one consumer of a general primitive, with no special status. Persisted to the `~/.prose` vault, so batons sync across machines.
 
 ## Machine-readable mode
 
@@ -114,6 +136,9 @@ prose grep -F "tsc --noEmit"              # literal string (no regex)
 prose grep -i "needle" --since 7d -C 3    # case-insensitive, last week, 3 lines context
 prose grep "foo" "bar" --cwd /path/here   # OR-alternation, scoped to one cwd
 prose grep "..." --json                   # structured matches with line numbers
+prose session 72a5eed3                    # full readout of one session by id-prefix
+prose session 72a5eed3 --turns 20         # tail the last 20 messages of that session
+prose session 72a5eed3 --json             # structured: metadata + full text
 ```
 
 `prose --help` is the canonical flag reference. Don't memorize defaults — they evolve.

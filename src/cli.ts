@@ -51,7 +51,17 @@ import {
   saveGlobalConfig,
   loadSourceManifest,
   getApiKey,
+  getChroniclePath,
+  loadChronicle,
+  appendChronicleEntry,
+  type ChronicleEntry,
 } from './memory.js';
+import {
+  loadChronicleConfig,
+  getChronicleConfigPath,
+  buildContent,
+  emitToDiscord,
+} from './sinks.js';
 import { getJinaEmbeddings, cosineSimilarity } from './jina.js';
 import { evolveHorizontal } from './horizontal.js';
 import { generateWebsite } from './web.js';
@@ -66,6 +76,8 @@ import { whisper } from './whisper.js';
 import { gossip } from './gossip.js';
 import { standup, parseDuration } from './standup.js';
 import { grep } from './grep.js';
+import { session, SessionAmbiguousError, SessionNotFoundError } from './session.js';
+import { setBaton, listBatons, clearBatons, renderBatonLine } from './baton.js';
 import type { SourceType } from './session-parser.js';
 import * as logger from './logger.js';
 
@@ -1628,7 +1640,7 @@ program
 
 program
   .command('snap')
-  .description('Verbatim readout of recent agent sessions in the current cwd (Claude Code CLI, ACP, and Codex). Orient without retracing.')
+  .description('Verbatim readout of recent agent sessions in the current cwd (Claude Code CLI, ACP, Codex, opencode, and Cursor). Orient without retracing.')
   .option('--bytes <n>', 'Byte budget for assembled text (default 4000)', (v) => parseInt(v, 10))
   .option('--turns <n>', 'Last N messages per session (default 4)', (v) => parseInt(v, 10))
   .option('--sessions <n>', 'Max sessions to include (default 5)', (v) => parseInt(v, 10))
@@ -1636,6 +1648,7 @@ program
   .option('--include-current', 'Include the actively-written session (default skipped)')
   .option('--include-sdk-cli', 'Include sdk-cli sessions (Claude Code automation: commit-message generators, etc. — noise by default)')
   .option('--cwd <path>', 'Override current working directory')
+  .option('--no-batons', 'Suppress the "you are here" baton header')
   .option('--json', 'Emit JSON with metadata instead of plain text')
   .action((options) => {
     const result = snap({
@@ -1646,6 +1659,7 @@ program
       maxMessageBytes: options.maxMessageBytes,
       includeCurrent: options.includeCurrent === true,
       includeSdkCli: options.includeSdkCli === true,
+      includeBatons: options.batons !== false,
     });
 
     if (options.json) {
@@ -1669,7 +1683,7 @@ program
 
 program
   .command('whisper')
-  .description('Verbatim readout of recent agent sessions across the cwd and its conceptual sibling repos (project family). Reads Claude Code CLI, ACP, and Codex. No LLM — pure read.')
+  .description('Verbatim readout of recent agent sessions across the cwd and its conceptual sibling repos (project family). Reads Claude Code CLI, ACP, Codex, opencode, and Cursor. No LLM — pure read.')
   .option('--bytes <n>', 'Byte budget for the assembled verbatim text (default 4000)', (v) => parseInt(v, 10))
   .option('--turns <n>', 'Last N messages per session (default 4)', (v) => parseInt(v, 10))
   .option('--sessions <n>', 'Max sessions to include per repo (default: 5 for self, 2 for siblings)', (v) => parseInt(v, 10))
@@ -1776,7 +1790,7 @@ program
 
 program
   .command('standup')
-  .description('Streamed cross-project standup over recent agent activity (Claude Code CLI, ACP, and Codex), grouped by working directory')
+  .description('Streamed cross-project standup over recent agent activity (Claude Code CLI, ACP, Codex, opencode, and Cursor), grouped by working directory')
   .option('--since <duration>', 'Time window for session inclusion: e.g. 30m, 4h, 1d, 2h30m (default 7d). Window decides which sessions to surface; per-session tail length is independent.')
   .option('--turns <n>', "Last N messages per session — taken from the session's overall tail, not the in-window slice (default 10)", (v) => parseInt(v, 10))
   .option('--bytes-per-session <n>', 'Per-session byte cap on rendered tail (default 1500)', (v) => parseInt(v, 10))
@@ -1853,7 +1867,7 @@ program
   .option('-F, --fixed-strings', 'Treat patterns as literal strings, not regex')
   .option('-m, --max-matches <n>', 'Cap on total matches across all sessions (default 50)', (v) => parseInt(v, 10))
   .option('--max-sessions <n>', 'Cap on sessions scanned (performance guardrail, default 500)', (v) => parseInt(v, 10))
-  .option('--source <type>', 'Restrict to a source: claude-code | codex | opencode (repeatable)', (v: string, prev: string[] = []) => [...prev, v])
+  .option('--source <type>', 'Restrict to a source: claude-code | codex | opencode | cursor (repeatable)', (v: string, prev: string[] = []) => [...prev, v])
   .option('--cwd <path>', 'Restrict to one cwd (default: all cwds)')
   .option('--since <duration>', 'Time window for inclusion: e.g. 30m, 4h, 1d, 2h30m (default: all time)')
   .option('--include-current', 'Include the actively-written claude-code session')
@@ -1872,7 +1886,7 @@ program
 
     let sources: SourceType[] | undefined;
     if (options.source && Array.isArray(options.source)) {
-      const valid: SourceType[] = ['claude-code', 'codex', 'opencode'];
+      const valid: SourceType[] = ['claude-code', 'codex', 'opencode', 'cursor'];
       const bad = options.source.filter((s: string) => !valid.includes(s as SourceType));
       if (bad.length > 0) {
         logger.error(`Unknown --source value(s): ${bad.join(', ')}. Valid: ${valid.join(', ')}.`);
@@ -1915,6 +1929,60 @@ program
 
     process.stdout.write(result.text);
     const trail = `\n# grep: ${result.matches.length} match group(s), ${result.totalMatchesBeforeCap} match line(s), ${result.sessionsWithMatches}/${result.sessionsScanned} session(s)${result.truncated ? ' (truncated by cap)' : ''}\n`;
+    process.stderr.write(trail);
+  });
+
+// ============================================================================
+// session - Verbatim readout of a single session by id (or id prefix)
+// ============================================================================
+
+program
+  .command('session <id>')
+  .description('Verbatim readout of one session by id (accepts any unique prefix). Scans Claude Code CLI, ACP, Codex, opencode, and Cursor. No cwd filter — the id is the selector.')
+  .option('--turns <n>', 'Tail the last N messages (default: all)', (v) => parseInt(v, 10))
+  .option('--since <iso>', 'Only include messages at or after this ISO timestamp')
+  .option('--max-message-bytes <n>', 'Per-message byte cap; long messages get truncated with [N bytes elided] (default 0 = no clipping)', (v) => parseInt(v, 10))
+  .option('--no-sdk-cli', 'Refuse to match a Claude-Code sdk-cli automation session (default: allow)')
+  .option('--json', 'Emit JSON with metadata + text instead of plain text')
+  .action((id: string, options) => {
+    let since: Date | undefined;
+    if (options.since) {
+      const parsed = new Date(options.since);
+      if (Number.isNaN(parsed.getTime())) {
+        logger.error(`Invalid --since timestamp: ${options.since}`);
+        process.exit(1);
+      }
+      since = parsed;
+    }
+
+    let result;
+    try {
+      result = session(id, {
+        turns: options.turns,
+        since,
+        maxMessageBytes: options.maxMessageBytes,
+        includeSdkCli: options.sdkCli !== false,
+      });
+    } catch (err) {
+      if (err instanceof SessionAmbiguousError) {
+        process.stderr.write(err.message + '\n');
+        process.exit(2);
+      }
+      if (err instanceof SessionNotFoundError) {
+        process.stderr.write(err.message + '\n');
+        process.exit(1);
+      }
+      logger.error(err instanceof Error ? err.message : String(err));
+      process.exit(1);
+    }
+
+    if (options.json) {
+      process.stdout.write(JSON.stringify(result, null, 2) + '\n');
+      return;
+    }
+
+    process.stdout.write(result.text);
+    const trail = `\n# session: ${result.messagesIncluded}/${result.messageCount} message(s), ${result.bytes} bytes, ${result.sourceType}\n`;
     process.stderr.write(trail);
   });
 
@@ -2017,6 +2085,95 @@ skillCmd
 // ============================================================================
 // config - Manage global configuration
 // ============================================================================
+
+// ============================================================================
+// baton - prose-native "you are here" markers (the one stateful verb)
+// ============================================================================
+function formatBatonAge(ms: number): string {
+  if (ms < 60_000) return `${Math.round(ms / 1000)}s ago`;
+  if (ms < 3_600_000) return `${Math.round(ms / 60_000)}m ago`;
+  if (ms < 86_400_000) return `${Math.round(ms / 3_600_000)}h ago`;
+  return `${Math.round(ms / 86_400_000)}d ago`;
+}
+
+const batonCmd = program
+  .command('baton')
+  .description('Persisted "you are here" batons. Bare `prose baton` lists the latest per project/type.');
+
+batonCmd
+  .command('set <content...>')
+  .description('Write a baton for the cwd. Accepts a `↪ LABEL: body` form, or set the label with --type.')
+  .option('--type <label>', 'Baton type label (default: parsed from content, else "baton")')
+  .option('--cwd <path>', 'Project the baton belongs to (default: current directory)')
+  .option('--json', 'Emit the stored baton as JSON')
+  .action((content: string[], options) => {
+    try {
+      const baton = setBaton({
+        content: content.join(' '),
+        type: options.type,
+        cwd: options.cwd,
+      });
+      if (options.json) {
+        process.stdout.write(JSON.stringify(baton, null, 2) + '\n');
+        return;
+      }
+      logger.success(`Baton set for ${baton.project}`);
+      process.stdout.write(renderBatonLine(baton) + '\n');
+    } catch (err) {
+      logger.error(err instanceof Error ? err.message : String(err));
+      process.exit(1);
+    }
+  });
+
+batonCmd
+  .command('list', { isDefault: true })
+  .description('Show batons — latest per project/type by default.')
+  .option('--cwd <path>', 'Scope to one project')
+  .option('--type <label>', 'Filter to one type')
+  .option('--history', 'Show full history instead of latest-per-project/type')
+  .option('--limit <n>', 'Cap the number shown', (v) => parseInt(v, 10))
+  .option('--json', 'Emit JSON')
+  .action((options) => {
+    const batons = listBatons({
+      cwd: options.cwd,
+      type: options.type,
+      history: options.history === true,
+      limit: options.limit,
+    });
+    if (options.json) {
+      process.stdout.write(JSON.stringify(batons, null, 2) + '\n');
+      return;
+    }
+    if (batons.length === 0) {
+      process.stderr.write('No batons yet.\n');
+      return;
+    }
+    const now = Date.now();
+    for (const b of batons) {
+      const age = formatBatonAge(now - new Date(b.timestamp).getTime());
+      process.stdout.write(`${renderBatonLine(b)}\n    ${b.project}  ·  ${age}\n`);
+    }
+  });
+
+batonCmd
+  .command('clear')
+  .description('Remove batons. Scope with --cwd/--type, or --all to wipe everything.')
+  .option('--cwd <path>', 'Only clear batons for this project')
+  .option('--type <label>', 'Only clear batons of this type')
+  .option('--all', 'Clear every baton (required for an unscoped wipe)')
+  .action((options) => {
+    try {
+      const removed = clearBatons({
+        cwd: options.cwd,
+        type: options.type,
+        all: options.all === true,
+      });
+      logger.success(`Removed ${removed} baton(s).`);
+    } catch (err) {
+      logger.error(err instanceof Error ? err.message : String(err));
+      process.exit(1);
+    }
+  });
 
 const configCmd = program.command('config').description('Manage global configuration settings');
 
@@ -2387,6 +2544,133 @@ indexCmd
     } catch (error: any) {
       logger.error(`❌ Failed to index source: ${error.message}`);
     }
+  });
+
+// ============================================================================
+// chronicle - a live dev-feed of freeform beats (durable log + optional sinks)
+// ============================================================================
+
+const chronicleCmd = program
+  .command('chronicle [title]')
+  .description('Record a live dev beat — appends to the durable log and emits to any configured sink')
+  .option('--emoji <emoji>', 'Emoji hint for the beat (e.g. 💡 🐛 ✅ 🔥)')
+  .option('--body <text>', 'Body text. Falls back to stdin if omitted.')
+  .option('--dry-run', 'Print the payload; write nothing, post nothing')
+  .action(async (title: string | undefined, opts: { emoji?: string; body?: string; dryRun?: boolean }) => {
+    if (!title) {
+      chronicleCmd.help();
+      return;
+    }
+
+    // Body falls back to stdin (matches Koru's post-dev-note.js).
+    let body = opts.body;
+    if (body == null && !process.stdin.isTTY) {
+      let data = '';
+      for await (const chunk of process.stdin) data += chunk;
+      if (data.trim()) body = data;
+    }
+
+    const cwd = process.cwd();
+    // Chronicle must work from the first beat in a fresh repo — detectProjectFromCwd
+    // returns undefined when there's no evolved memory and no sessions yet, so fall
+    // back to the sanitized cwd (same key shape a later `evolve` will land on).
+    const project = detectProjectFromCwd() ?? sanitizePath(cwd);
+    const config = loadChronicleConfig(cwd);
+    const content = buildContent(opts.emoji, title, body);
+
+    if (opts.dryRun) {
+      console.log('[DRY RUN] Would record this beat:');
+      console.log('---');
+      console.log(content);
+      console.log('---');
+      console.log(`(${content.length} chars, project: ${formatProjectName(project)})`);
+      const discord = config?.sinks?.discord;
+      console.log(discord?.webhook
+        ? `Would emit to Discord${discord.username ? ` as "${discord.username}"` : ''}.`
+        : 'No Discord sink configured — would write the durable log only.');
+      return;
+    }
+
+    // 1. Always append to the durable log first.
+    const entry: ChronicleEntry = {
+      ts: new Date().toISOString(),
+      ...(opts.emoji ? { emoji: opts.emoji } : {}),
+      title: title.trim(),
+      ...(body?.trim() ? { body: body.trim() } : {}),
+    };
+    appendChronicleEntry(project, entry);
+    logger.success(`📓 Logged beat to ${formatProjectName(project)}`);
+
+    // 2. Emit to the Discord sink if one is configured. No sink is not an error.
+    const discord = config?.sinks?.discord;
+    if (discord?.webhook) {
+      await emitToDiscord(discord, content);
+      logger.success(`📡 Posted to Discord${discord.channel ? ` (${discord.channel})` : ''}`);
+    }
+  });
+
+chronicleCmd
+  .command('about')
+  .description('Print the charter — what this repo is chronicling, and in what voice')
+  .action(() => {
+    const config = loadChronicleConfig(process.cwd());
+    if (!config) {
+      logger.info('No chronicle config yet. Run `prose chronicle init` to scaffold one.');
+      return;
+    }
+    logger.info('📓 Chronicle charter\n');
+    console.log(`   about:      ${config.about ?? '(not set)'}`);
+    console.log(`   enthusiasm: ${config.enthusiasm ?? '(not set)'}`);
+    const discord = config.sinks?.discord;
+    console.log(`   discord:    ${discord?.webhook ? `configured${discord.channel ? ` → ${discord.channel}` : ''}` : '(no sink)'}`);
+  });
+
+chronicleCmd
+  .command('init')
+  .description('Scaffold .claude/prose/chronicle.json (charter + enthusiasm + sinks)')
+  .action(() => {
+    const cwd = process.cwd();
+    const path = getChronicleConfigPath(cwd);
+    if (existsSync(path)) {
+      logger.info(`ℹ️  Chronicle config already exists at ${path} — not overwriting.`);
+      return;
+    }
+    const dir = dirname(path);
+    if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+
+    // Ensure .claude/prose/ is gitignored BEFORE writing the secret webhook.
+    // chronicle init may run standalone (without a prior `prose init`), so it
+    // can't assume the ignore entry already exists — otherwise the webhook
+    // becomes committable. Mirrors the gitignore logic in `prose init`.
+    const proseIgnore = '.claude/prose/';
+    const gitignorePath = join(cwd, '.gitignore');
+    if (existsSync(gitignorePath)) {
+      const gitignoreContent = readFileSync(gitignorePath, 'utf-8');
+      if (!gitignoreContent.includes(proseIgnore)) {
+        writeFileSync(gitignorePath, `${gitignoreContent}\n# Prose local data (carries the chronicle webhook secret)\n${proseIgnore}\n`);
+        logger.info(`🛡️  Added ${proseIgnore} to .gitignore`);
+      }
+    } else if (isGitRepo(cwd)) {
+      writeFileSync(gitignorePath, `# Prose local data (carries the chronicle webhook secret)\n${proseIgnore}\n`);
+      logger.info(`🛡️  Created .gitignore with ${proseIgnore}`);
+    } else {
+      logger.info(`⚠️  Not a git repo — skipping .gitignore. Keep ${proseIgnore} out of version control yourself.`);
+    }
+
+    const template = {
+      about: 'What this repo is chronicling, and in what voice. e.g. "Live-coding X. Post breakthroughs, ugly bugs, and \'oh shit it compiles\' moments. Voice: terse, a little unhinged, emoji-forward."',
+      enthusiasm: 'high',
+      sinks: {
+        discord: {
+          webhook: 'https://discord.com/api/webhooks/...',
+          channel: '#dev-notes',
+          username: 'your-name-here',
+        },
+      },
+    };
+    writeFileSync(path, JSON.stringify(template, null, 2));
+    logger.success(`📓 Scaffolded ${path}`);
+    logger.info('   Fill in the Discord webhook (this file is gitignored — the webhook is a secret).');
   });
 
 program.parse();

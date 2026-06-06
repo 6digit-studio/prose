@@ -17,6 +17,11 @@ import {
   discoverOpencodeSessionFiles,
   parseOpencodeSessionFile,
 } from './opencode-session-parser.js';
+import {
+  discoverCursorSessionFiles,
+  parseCursorSessionFile,
+} from './cursor-session-parser.js';
+import { listBatons, renderBatonHeader, type Baton } from './baton.js';
 
 export interface SnapOptions {
   cwd?: string;
@@ -48,6 +53,12 @@ export interface SnapOptions {
   /** Include the actively-written session (default false). */
   includeCurrent?: boolean;
   /**
+   * Prepend the cwd's latest batons ("you are here" markers) as a compact
+   * header. Default true — orientation should carry the last sign-off for
+   * free. Pass false to suppress (e.g. when composing snap output elsewhere).
+   */
+  includeBatons?: boolean;
+  /**
    * Include `entrypoint: 'sdk-cli'` Claude Code sessions. These are one-shot
    * SDK invocations Claude Code makes for its own automation (commit-message
    * generation, summaries, subagent dispatch). Default false — they are noise
@@ -74,6 +85,8 @@ export interface SnapResult {
   turnsIncluded: number;
   truncated: boolean;
   sessions: SnapSessionMeta[];
+  /** Latest batons for this cwd (latest per type), newest-first. */
+  batons: Baton[];
 }
 
 function formatAge(ms: number): string {
@@ -138,12 +151,14 @@ export function snap(opts: SnapOptions = {}): SnapResult {
   const liveWindowMs = opts.liveSessionWindowMs ?? 10_000;
   const includeCurrent = opts.includeCurrent ?? false;
   const includeSdkCli = opts.includeSdkCli ?? false;
+  const includeBatons = opts.includeBatons ?? true;
 
   // Pass cwd as both projectPath and currentCwd so we hit the cwd-match
   // primary scan AND the misfiled-session secondary scan.
   const claudeFiles = discoverSessionFiles(cwd, cwd);
   const codexFiles = discoverCodexSessionFiles(cwd);
   const opencodeFiles = discoverOpencodeSessionFiles(cwd);
+  const cursorFiles = discoverCursorSessionFiles(cwd);
   const now = Date.now();
 
   // Parse a wider set of candidates than maxSessions so we can re-sort by
@@ -156,6 +171,7 @@ export function snap(opts: SnapOptions = {}): SnapResult {
     ...claudeFiles.slice(0, perSourceCap),
     ...codexFiles.slice(0, perSourceCap),
     ...opencodeFiles.slice(0, perSourceCap),
+    ...cursorFiles.slice(0, perSourceCap),
   ].sort((a, b) => b.modifiedTime.getTime() - a.modifiedTime.getTime());
 
   type Parsed = {
@@ -173,6 +189,8 @@ export function snap(opts: SnapOptions = {}): SnapResult {
         ? parseCodexSessionFile(f.path)
         : f.sourceType === 'opencode'
         ? parseOpencodeSessionFile(f.path)
+        : f.sourceType === 'cursor'
+        ? parseCursorSessionFile(f.path)
         : parseSessionFile(f.path);
     if (conv.messages.length === 0) continue;
 
@@ -218,6 +236,8 @@ export function snap(opts: SnapOptions = {}): SnapResult {
         ? 'Codex'
         : p.file.sourceType === 'opencode'
         ? 'opencode'
+        : p.file.sourceType === 'cursor'
+        ? 'Cursor'
         : 'Claude Code';
 
     // Try the full tail first; if it overflows the remaining budget, shrink.
@@ -270,13 +290,19 @@ export function snap(opts: SnapOptions = {}): SnapResult {
     }
   }
 
+  // Batons are orientation metadata, not session content — prepend them as a
+  // header without charging them against the byte budget.
+  const batons = includeBatons ? listBatons({ cwd }) : [];
+  const text = renderBatonHeader(batons) + sections.join('\n');
+
   return {
     cwd,
-    text: sections.join('\n'),
+    text,
     bytes,
     sessionsIncluded: sessionsMeta.length,
     turnsIncluded,
     truncated,
     sessions: sessionsMeta,
+    batons,
   };
 }

@@ -58,9 +58,10 @@ export interface Conversation {
    * subagents). Undefined for Codex / opencode / pre-entrypoint sessions.
    */
   entrypoint?: string;
+  sourceType?: SourceType;
 }
 
-export type SourceType = 'claude-code' | 'git' | 'antigravity' | 'codex' | 'opencode';
+export type SourceType = 'claude-code' | 'git' | 'antigravity' | 'codex' | 'opencode' | 'cursor';
 
 export interface SessionFile {
   path: string;
@@ -346,6 +347,7 @@ export function parseSessionFile(filePath: string): Conversation {
     endTime: messages[messages.length - 1]?.timestamp || new Date(),
     processedBytes: lastSuccessfulOffset,
     entrypoint,
+    sourceType: 'claude-code',
   };
 }
 

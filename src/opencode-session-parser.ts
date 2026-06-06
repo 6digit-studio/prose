@@ -235,5 +235,6 @@ export function parseOpencodeSessionFile(filePath: string): Conversation {
     startTime,
     endTime,
     processedBytes: 0,
+    sourceType: 'opencode',
   };
 }

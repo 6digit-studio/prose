@@ -231,6 +231,7 @@ function parseCodexJson(filePath: string): Conversation {
     startTime: messages[0]?.timestamp || baseTimestamp,
     endTime: messages[messages.length - 1]?.timestamp || baseTimestamp,
     processedBytes: buffer.length,
+    sourceType: 'codex',
   };
 }
 
@@ -246,6 +247,7 @@ function parseCodexJsonl(filePath: string): Conversation {
     startTime: parsed.messages[0]?.timestamp || new Date(),
     endTime: parsed.messages[parsed.messages.length - 1]?.timestamp || new Date(),
     processedBytes: parsed.processedBytes,
+    sourceType: 'codex',
   };
 }
 

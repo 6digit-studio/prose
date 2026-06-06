@@ -1,6 +1,6 @@
 {
   "name": "@6digit/prose",
-  "version": "0.7.1",
+  "version": "0.8.0",
   "description": "Semantic memory and stateless session inspection for AI-driven development (EXPERIMENTAL)",
   "author": "6digit-studio",
   "repository": {
@@ -23,6 +23,7 @@
   "files": [
     "dist",
     "skill",
+    "skill-chronicle",
     "README.md",
     "LICENSE"
   ],

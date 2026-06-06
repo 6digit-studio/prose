@@ -3,7 +3,7 @@
  */
 
 import { execSync } from 'child_process';
-import { readFileSync, readdirSync, existsSync, statSync } from 'fs';
+import { readFileSync, readdirSync, existsSync, statSync, openSync, readSync, closeSync } from 'fs';
 import { join, basename } from 'path';
 import { homedir } from 'os';
 import type { Message, SessionFile } from './session-parser.js';
@@ -88,12 +88,27 @@ export function getAntigravityBrains(): string[] {
 }
 
 /**
- * Parse Antigravity artifacts as pseudo-sessions
+ * Discover and parse Antigravity artifacts and transcripts as pseudo-sessions
  */
 export function getAntigravityArtifacts(brainPath: string, projectName: string): SessionFile[] {
     if (!existsSync(brainPath)) return [];
 
     const artifacts: SessionFile[] = [];
+    
+    // 1. Discover transcript.jsonl if present
+    const transcriptPath = join(brainPath, '.system_generated', 'logs', 'transcript.jsonl');
+    if (existsSync(transcriptPath)) {
+        const stats = statSync(transcriptPath);
+        artifacts.push({
+            path: transcriptPath,
+            sessionId: `anti-${basename(brainPath)}-transcript`,
+            project: projectName,
+            modifiedTime: stats.mtime,
+            fileSize: stats.size,
+        });
+    }
+
+    // 2. Discover standard markdown artifacts (.md files)
     const files = readdirSync(brainPath, { withFileTypes: true })
         .filter(f => f.isFile() && f.name.endsWith('.md'));
 
@@ -115,13 +130,61 @@ export function getAntigravityArtifacts(brainPath: string, projectName: string):
 }
 
 /**
- * Read and format an Antigravity artifact as a message
+ * Read and format an Antigravity artifact or transcript as messages
  */
 export function parseAntigravityArtifact(filePath: string, sessionId: string, project: string): Message[] {
     try {
-        const content = readFileSync(filePath, 'utf-8');
         const stats = statSync(filePath);
 
+        // 1. Handle transcript.jsonl
+        if (filePath.endsWith('transcript.jsonl')) {
+            const content = readFileSync(filePath, 'utf-8');
+            const messages: Message[] = [];
+
+            for (const line of content.split('\n')) {
+                if (!line.trim()) continue;
+                try {
+                    const parsed = JSON.parse(line);
+                    const timestamp = new Date(parsed.created_at || parsed.timestamp || stats.mtime);
+
+                    if (parsed.type === 'USER_INPUT' || parsed.source === 'USER_EXPLICIT') {
+                        if (parsed.content && typeof parsed.content === 'string') {
+                            messages.push({
+                                role: 'user',
+                                content: parsed.content,
+                                timestamp,
+                                source: {
+                                    sessionId,
+                                    messageUuid: `${sessionId}-${parsed.step_index ?? messages.length}`,
+                                    timestamp,
+                                    filePath,
+                                }
+                            });
+                        }
+                    } else if (parsed.source === 'MODEL') {
+                        if (parsed.content && typeof parsed.content === 'string' && parsed.content.trim()) {
+                            messages.push({
+                                role: 'assistant',
+                                content: parsed.content,
+                                timestamp,
+                                source: {
+                                    sessionId,
+                                    messageUuid: `${sessionId}-${parsed.step_index ?? messages.length}`,
+                                    timestamp,
+                                    filePath,
+                                }
+                            });
+                        }
+                    }
+                } catch {
+                    // Ignore line-parse errors (partial lines at end of active files)
+                }
+            }
+            return messages;
+        }
+
+        // 2. Handle standard markdown artifacts
+        const content = readFileSync(filePath, 'utf-8');
         return [{
             role: 'assistant', // Artifacts are agent output
             content: `ANTIGRAVITY ARTIFACT:\n\n${content}`,
@@ -139,21 +202,53 @@ export function parseAntigravityArtifact(filePath: string, sessionId: string, pr
 }
 
 /**
- * Fuzzy match a brain to a project name by checking its task.md
+ * Fuzzy match a brain to a project name by checking its task.md, implementation_plan.md, or transcript.jsonl
  */
 export function matchBrainToProject(brainPath: string, projectFilter: string): boolean {
+    const sanitizedFilter = projectFilter.replace(/^-Users-[^-]+-src-/, '').toLowerCase();
+
+    // 1. Check task.md
     const taskPath = join(brainPath, 'task.md');
-    if (!existsSync(taskPath)) return false;
-
-    try {
-        const content = readFileSync(taskPath, 'utf-8').toLowerCase();
-        const sanitizedFilter = projectFilter.replace(/^-Users-[^-]+-src-/, '').toLowerCase();
-
-        return content.includes(sanitizedFilter) ||
-            sanitizedFilter.includes(basename(brainPath).toLowerCase());
-    } catch {
-        return false;
+    if (existsSync(taskPath)) {
+        try {
+            const content = readFileSync(taskPath, 'utf-8').toLowerCase();
+            if (content.includes(sanitizedFilter) ||
+                sanitizedFilter.includes(basename(brainPath).toLowerCase())) {
+                return true;
+            }
+        } catch {}
     }
+
+    // 2. Check implementation_plan.md
+    const planPath = join(brainPath, 'implementation_plan.md');
+    if (existsSync(planPath)) {
+        try {
+            const content = readFileSync(planPath, 'utf-8').toLowerCase();
+            if (content.includes(sanitizedFilter)) {
+                return true;
+            }
+        } catch {}
+    }
+
+    // 3. Check transcript.jsonl (extremely robust!)
+    const transcriptPath = join(brainPath, '.system_generated', 'logs', 'transcript.jsonl');
+    if (existsSync(transcriptPath)) {
+        try {
+            const fd = openSync(transcriptPath, 'r');
+            const buffer = Buffer.alloc(65536);
+            const bytesRead = readSync(fd, buffer, 0, buffer.length, 0);
+            closeSync(fd);
+            const content = buffer.subarray(0, bytesRead).toString('utf-8').toLowerCase();
+
+            if (content.includes(sanitizedFilter) ||
+                content.includes(basename(projectFilter).toLowerCase()) ||
+                projectFilter.toLowerCase().includes(basename(brainPath).toLowerCase())) {
+                return true;
+            }
+        } catch {}
+    }
+
+    return false;
 }
 
 /**
