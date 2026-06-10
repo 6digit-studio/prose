@@ -7,6 +7,8 @@
 import express from 'express';
 import { loadMemoryIndex, loadProjectMemory, searchMemory, getMemoryStats, getApiKey, getMemoryDir } from './memory.js';
 import { discoverSessionFiles } from './session-parser.js';
+import { stats } from './stats.js';
+import { parseDuration } from './standup.js';
 import { join } from 'path';
 import { existsSync, readdirSync, readFileSync } from 'fs';
 import crypto from 'crypto';
@@ -121,6 +123,26 @@ app.get('/api/search', async (req, res) => {
 app.get('/api/stats', (req, res) => {
   const stats = getMemoryStats();
   res.json(stats);
+});
+
+// Activity metrics over the session journals (the `prose stats` verb).
+// Global across all cwds; ?since=7d / ?idleGap=15m / ?cwd=/abs/path to tune.
+app.get('/api/activity', (req, res) => {
+  try {
+    const since = (req.query.since as string) || '30d';
+    const idleGap = req.query.idleGap as string | undefined;
+    const result = stats({
+      sinceMs: parseDuration(since),
+      idleGapMs: idleGap ? parseDuration(idleGap) : undefined,
+      cwd: (req.query.cwd as string) || undefined,
+      cache: req.query.refresh !== '1',
+    });
+    // The text field is the terminal rendering — the dashboard draws its own charts.
+    const { text, ...payload } = result;
+    res.json(payload);
+  } catch (err) {
+    res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
+  }
 });
 
 // Get session snapshots for a project
@@ -322,9 +344,9 @@ app.get('/artifacts/:projectId/:sessionId', (req, res) => {
     // Render as HTML
     const messagesHtml = messages.map((msg, i) => {
       const isDesigner = msg.role === 'Designer';
-      const bgColor = isDesigner ? '#0d1117' : '#161b22';
-      const borderColor = isDesigner ? '#30363d' : '#3fb950';
-      const roleColor = isDesigner ? '#58a6ff' : '#3fb950';
+      const bgColor = isDesigner ? 'var(--bg)' : 'var(--bg-secondary)';
+      const borderColor = isDesigner ? 'var(--accent)' : 'var(--green)';
+      const roleColor = isDesigner ? 'var(--accent)' : 'var(--green)';
 
       return `
         <div style="margin: 1.5rem 0; padding: 1.5rem; background: ${bgColor}; border-left: 3px solid ${borderColor}; border-radius: 4px;">
@@ -348,21 +370,28 @@ app.get('/artifacts/:projectId/:sessionId', (req, res) => {
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>Session ${metadata.title}</title>
+        <link rel="preconnect" href="https://fonts.googleapis.com">
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Sora:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
         <style>
+          /* Intranquil violet theme — matches the dashboard */
           :root {
-            --bg: #0d1117;
-            --bg-secondary: #161b22;
-            --text: #c9d1d9;
-            --text-muted: #8b949e;
-            --accent: #58a6ff;
-            --green: #3fb950;
-            --border: #30363d;
+            --bg: oklch(0.17 0.075 312);
+            --bg-secondary: oklch(0.225 0.09 312);
+            --text: oklch(0.98 0.02 320);
+            --text-muted: oklch(0.79 0.07 320);
+            --accent: oklch(0.62 0.28 330);
+            --green: oklch(0.74 0.16 158);
+            --border: oklch(0.82 0.14 330 / 22%);
+            --font-display: 'Space Grotesk', 'Sora', sans-serif;
+            --font-sans: 'Sora', sans-serif;
+            --font-mono: 'JetBrains Mono', ui-monospace, monospace;
           }
 
           * { box-sizing: border-box; margin: 0; padding: 0; }
 
           body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+            font-family: var(--font-sans);
             background: var(--bg);
             color: var(--text);
             line-height: 1.6;
@@ -396,15 +425,18 @@ app.get('/artifacts/:projectId/:sessionId', (req, res) => {
           .breadcrumb a:hover { text-decoration: underline; }
 
           h1 {
-            font-size: 1.5rem;
+            font-family: var(--font-display);
+            font-size: 1.4rem;
+            letter-spacing: -0.02em;
             margin-bottom: 0.5rem;
-            color: var(--accent);
+            color: var(--text);
           }
 
           .meta {
             display: flex;
             gap: 2rem;
-            font-size: 0.9rem;
+            font-family: var(--font-mono);
+            font-size: 0.8rem;
             color: var(--text-muted);
             flex-wrap: wrap;
           }
@@ -438,7 +470,7 @@ app.get('/artifacts/:projectId/:sessionId', (req, res) => {
             background: var(--bg-secondary);
             padding: 0.2em 0.4em;
             border-radius: 3px;
-            font-family: 'Courier New', monospace;
+            font-family: var(--font-mono);
             font-size: 0.9em;
           }
 
@@ -527,27 +559,57 @@ const dashboardHtml = `
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Claude Prose Dashboard</title>
+  <title>prose — dashboard</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Sora:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
   <style>
+    /* Intranquil design language (violet theme), translated for the dashboard.
+       Type roles: display (Space Grotesk) → wordmark; sans (Sora) → prose;
+       mono (JetBrains Mono) → tabular readouts; micro (Inter) → small
+       uppercase chrome. Token NAMES kept from the old theme so all markup
+       keeps working; VALUES are the Intranquil violet palette. */
     :root {
-      --bg: #0d1117;
-      --bg-secondary: #161b22;
-      --bg-tertiary: #21262d;
-      --border: #30363d;
-      --text: #c9d1d9;
-      --text-muted: #8b949e;
-      --accent: #58a6ff;
-      --green: #3fb950;
-      --yellow: #d29922;
-      --red: #f85149;
-      --purple: #a371f7;
+      --bg: oklch(0.17 0.075 312);
+      --bg-secondary: oklch(0.225 0.09 312);
+      --bg-tertiary: oklch(0.3 0.085 312);
+      --bg-active: oklch(0.35 0.11 312);
+      --border: oklch(0.82 0.14 330 / 22%);
+      --grid: oklch(0.82 0.14 330 / 9%);
+      --text: oklch(0.98 0.02 320);
+      --text-muted: oklch(0.79 0.07 320);
+      --accent: oklch(0.62 0.28 330);
+      --accent-foreground: oklch(0.99 0.01 330);
+      --brand-bg: linear-gradient(135deg, oklch(0.6 0.27 292), oklch(0.66 0.28 352));
+      --wave: oklch(0.68 0.28 350);
+      --green: oklch(0.74 0.16 158);
+      --green-foreground: oklch(0.16 0.04 158);
+      --yellow: oklch(0.8 0.15 85);
+      --yellow-foreground: oklch(0.2 0.05 85);
+      --red: oklch(0.72 0.2 18);
+      --purple: oklch(0.6 0.27 292);
+      --radius: 0.625rem;
+      --font-display: 'Space Grotesk', 'Sora', sans-serif;
+      --font-sans: 'Sora', sans-serif;
+      --font-mono: 'JetBrains Mono', ui-monospace, monospace;
+      --font-micro: 'Inter', 'Sora', sans-serif;
+      /* Chart series tokens (canvas can't read gradients; flat + alpha fills) */
+      --chart-active: oklch(0.68 0.28 350);
+      --chart-active-fill: oklch(0.68 0.28 350 / 16%);
+      --chart-human: oklch(0.6 0.27 292);
+      --chart-human-fill: oklch(0.6 0.27 292 / 22%);
+      --chart-user: oklch(0.74 0.16 158);
+      --chart-user-fill: oklch(0.74 0.16 158 / 16%);
+      --chart-asst: oklch(0.79 0.07 320 / 70%);
+      --chart-asst-fill: oklch(0.79 0.07 320 / 10%);
     }
 
     * { box-sizing: border-box; margin: 0; padding: 0; }
 
     body {
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+      font-family: var(--font-sans);
       background: var(--bg);
       color: var(--text);
       height: 100vh;
@@ -556,36 +618,48 @@ const dashboardHtml = `
     }
 
     header {
-      background: var(--bg-secondary);
+      position: sticky;
+      top: 0;
+      z-index: 30;
+      background: color-mix(in oklab, var(--bg) 85%, transparent);
+      backdrop-filter: blur(12px);
       border-bottom: 1px solid var(--border);
-      padding: 0.75rem 1rem;
+      padding: 0 1.25rem;
+      height: 3.5rem;
       display: flex;
       align-items: center;
-      gap: 1rem;
+      gap: 1.5rem;
+      flex-shrink: 0;
     }
 
     .logo {
-      font-size: 1.25rem;
+      font-family: var(--font-display);
+      font-size: 1.15rem;
       font-weight: 600;
-      background: linear-gradient(135deg, var(--accent), var(--purple));
+      letter-spacing: -0.02em;
+      background: var(--brand-bg);
       -webkit-background-clip: text;
       -webkit-text-fill-color: transparent;
     }
 
     .search-box {
       flex: 1;
-      max-width: 400px;
+      max-width: 360px;
+      margin-left: auto;
     }
 
     .search-box input {
       width: 100%;
-      background: var(--bg);
+      background: var(--bg-secondary);
       border: 1px solid var(--border);
-      border-radius: 6px;
-      padding: 0.5rem 0.75rem;
+      border-radius: calc(var(--radius) * 0.8);
+      padding: 0.45rem 0.75rem;
       color: var(--text);
-      font-size: 0.9rem;
+      font-family: var(--font-micro);
+      font-size: 0.85rem;
     }
+
+    .search-box input::placeholder { color: var(--text-muted); opacity: 0.7; }
 
     .search-box input:focus {
       outline: none;
@@ -599,45 +673,54 @@ const dashboardHtml = `
     }
 
     .sidebar {
-      width: 200px;
+      width: 220px;
       background: var(--bg-secondary);
       border-right: 1px solid var(--border);
       overflow-y: auto;
-      padding: 0.5rem;
+      padding: 0.75rem 0.6rem;
+      flex-shrink: 0;
     }
 
     .sidebar h3 {
-      font-size: 0.7rem;
+      font-family: var(--font-micro);
+      font-size: 0.68rem;
+      font-weight: 600;
       text-transform: uppercase;
       color: var(--text-muted);
+      opacity: 0.7;
       padding: 0.5rem;
-      letter-spacing: 0.05em;
+      letter-spacing: 0.18em;
     }
 
     .project-item {
-      padding: 0.5rem 0.75rem;
-      border-radius: 6px;
+      padding: 0.45rem 0.75rem;
+      border-radius: calc(var(--radius) * 0.8);
       cursor: pointer;
       display: flex;
       justify-content: space-between;
       align-items: center;
-      font-size: 0.9rem;
+      font-family: var(--font-micro);
+      font-size: 0.85rem;
+      color: var(--text-muted);
+      transition: color 0.15s, background 0.15s;
     }
 
-    .project-item:hover { background: var(--bg-tertiary); }
-    .project-item.active { background: var(--accent); color: #000; }
+    .project-item:hover { background: var(--bg-tertiary); color: var(--text); }
+    .project-item.active { background: var(--bg-active); color: var(--text); }
 
     .project-count {
-      font-size: 0.75rem;
+      font-family: var(--font-mono);
+      font-variant-numeric: tabular-nums;
+      font-size: 0.7rem;
       background: var(--bg);
-      padding: 0.1rem 0.4rem;
+      padding: 0.1rem 0.45rem;
       border-radius: 10px;
       color: var(--text-muted);
     }
 
     .project-item.active .project-count {
-      background: rgba(0,0,0,0.2);
-      color: #000;
+      background: oklch(0 0 0 / 25%);
+      color: var(--text);
     }
 
     .content {
@@ -649,41 +732,49 @@ const dashboardHtml = `
 
     .tabs {
       display: flex;
-      background: var(--bg-secondary);
+      gap: 0.25rem;
       border-bottom: 1px solid var(--border);
-      padding: 0 1rem;
+      padding: 0.5rem 1.25rem;
+      flex-shrink: 0;
     }
 
     .tab {
-      padding: 0.75rem 1rem;
+      padding: 0.4rem 0.85rem;
       cursor: pointer;
-      border-bottom: 2px solid transparent;
+      border-radius: calc(var(--radius) * 0.8);
       color: var(--text-muted);
-      font-size: 0.9rem;
+      font-family: var(--font-micro);
+      font-size: 0.85rem;
+      font-weight: 500;
+      transition: color 0.15s, background 0.15s;
     }
 
     .tab:hover { color: var(--text); }
-    .tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+    .tab.active { background: var(--bg-active); color: var(--text); }
 
     .tab-badge {
-      font-size: 0.7rem;
-      background: var(--bg);
+      font-family: var(--font-mono);
+      font-variant-numeric: tabular-nums;
+      font-size: 0.68rem;
+      background: var(--bg-secondary);
       padding: 0.1rem 0.4rem;
       border-radius: 10px;
-      margin-left: 0.5rem;
+      margin-left: 0.4rem;
     }
 
     .fragments-container {
       flex: 1;
       overflow-y: auto;
-      padding: 1rem;
+      padding: 1.25rem;
+      /* center content at a readable width; scrollbar stays at the window edge */
+      padding-inline: max(1.25rem, calc((100% - 1280px) / 2));
     }
 
     .fragment {
       background: var(--bg-secondary);
       border: 1px solid var(--border);
-      border-radius: 8px;
-      padding: 1rem;
+      border-radius: calc(var(--radius) * 1.4);
+      padding: 1.1rem 1.25rem;
       margin-bottom: 0.75rem;
     }
 
@@ -697,18 +788,18 @@ const dashboardHtml = `
     }
 
     .fragment-id {
-      font-family: monospace;
-      font-size: 0.75rem;
+      font-family: var(--font-mono);
+      font-size: 0.72rem;
       color: var(--text-muted);
       background: var(--bg);
-      padding: 0.2rem 0.4rem;
-      border-radius: 4px;
+      padding: 0.2rem 0.45rem;
+      border-radius: calc(var(--radius) * 0.6);
       cursor: pointer;
       transition: background 0.2s;
     }
 
-    .fragment-id:hover { background: var(--accent); color: #000; }
-    .fragment-id.copied { background: var(--green); color: #000; }
+    .fragment-id:hover { background: var(--accent); color: var(--accent-foreground); }
+    .fragment-id.copied { background: var(--green); color: var(--green-foreground); }
 
     .fragment-content {
       font-size: 0.95rem;
@@ -729,15 +820,15 @@ const dashboardHtml = `
       margin-right: 0.5rem;
     }
 
-    .badge-certain { background: var(--green); color: #000; }
-    .badge-tentative { background: var(--yellow); color: #000; }
-    .badge-revisiting { background: var(--red); color: #fff; }
+    .badge-certain { background: var(--green); color: var(--green-foreground); }
+    .badge-tentative { background: var(--yellow); color: var(--yellow-foreground); }
+    .badge-revisiting { background: var(--red); color: var(--accent-foreground); }
 
     .musings-box {
-      background: linear-gradient(135deg, rgba(88, 166, 255, 0.1), rgba(163, 113, 247, 0.1));
-      border: 1px solid var(--purple);
-      border-radius: 8px;
-      padding: 1rem;
+      background: linear-gradient(135deg, oklch(0.6 0.27 292 / 12%), oklch(0.66 0.28 352 / 12%));
+      border: 1px solid oklch(0.82 0.14 330 / 35%);
+      border-radius: calc(var(--radius) * 1.4);
+      padding: 1rem 1.25rem;
       margin-bottom: 1rem;
       font-style: italic;
     }
@@ -786,7 +877,7 @@ const dashboardHtml = `
     .session-card {
       background: var(--bg-secondary);
       border: 1px solid var(--border);
-      border-radius: 8px;
+      border-radius: calc(var(--radius) * 1.4);
       margin-bottom: 0.75rem;
       overflow: hidden;
     }
@@ -809,8 +900,8 @@ const dashboardHtml = `
     }
 
     .session-id {
-      font-family: monospace;
-      font-size: 0.8rem;
+      font-family: var(--font-mono);
+      font-size: 0.78rem;
       color: var(--text-muted);
       margin-left: 0.75rem;
     }
@@ -847,10 +938,13 @@ const dashboardHtml = `
     }
 
     .session-section-title {
-      font-size: 0.8rem;
+      font-family: var(--font-micro);
+      font-size: 0.72rem;
+      font-weight: 600;
       color: var(--text-muted);
+      opacity: 0.8;
       text-transform: uppercase;
-      letter-spacing: 0.05em;
+      letter-spacing: 0.18em;
       margin-bottom: 0.5rem;
     }
 
@@ -891,7 +985,7 @@ const dashboardHtml = `
       background: var(--bg);
       padding: 0.15rem 0.35rem;
       border-radius: 4px;
-      font-family: 'SF Mono', Monaco, monospace;
+      font-family: var(--font-mono);
       font-size: 0.85em;
     }
 
@@ -934,6 +1028,173 @@ const dashboardHtml = `
     }
 
     .markdown-content strong { color: var(--text); }
+
+    /* Activity view — sized so cards + both day-series graphs fit one screen */
+    .activity-toolbar {
+      display: flex;
+      align-items: center;
+      gap: 0.4rem;
+      margin-bottom: 0.85rem;
+    }
+
+    .activity-scope {
+      font-family: var(--font-micro);
+      color: var(--text-muted);
+      opacity: 0.8;
+      font-size: 0.78rem;
+      margin-left: auto;
+    }
+
+    .range-btn {
+      background: transparent;
+      border: 1px solid var(--border);
+      border-radius: calc(var(--radius) * 0.8);
+      color: var(--text-muted);
+      padding: 0.3rem 0.7rem;
+      font-family: var(--font-micro);
+      font-size: 0.8rem;
+      font-weight: 500;
+      cursor: pointer;
+      transition: color 0.15s, background 0.15s, border-color 0.15s;
+    }
+
+    .range-btn:hover { color: var(--text); border-color: var(--accent); }
+    .range-btn.active { background: var(--accent); color: var(--accent-foreground); border-color: var(--accent); }
+
+    .stat-cards {
+      display: grid;
+      grid-template-columns: repeat(8, 1fr);
+      gap: 0.6rem;
+      margin-bottom: 0.85rem;
+    }
+
+    @media (max-width: 1100px) {
+      .stat-cards { grid-template-columns: repeat(4, 1fr); }
+    }
+
+    .stat-card {
+      background: var(--bg-secondary);
+      border: 1px solid var(--border);
+      border-radius: calc(var(--radius) * 1.4);
+      padding: 0.7rem 0.9rem;
+    }
+
+    .stat-card-value {
+      font-family: var(--font-mono);
+      font-variant-numeric: tabular-nums;
+      font-size: 1.25rem;
+      font-weight: 600;
+      color: var(--wave);
+    }
+
+    .stat-card-value.purple { color: var(--purple); }
+    .stat-card-value.green { color: var(--green); }
+    .stat-card-value.plain { color: var(--text); }
+
+    .stat-card-label {
+      font-family: var(--font-micro);
+      font-size: 0.62rem;
+      font-weight: 600;
+      color: var(--text-muted);
+      opacity: 0.75;
+      text-transform: uppercase;
+      letter-spacing: 0.16em;
+      margin-top: 0.2rem;
+    }
+
+    .chart-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 0.6rem;
+    }
+
+    .chart-box {
+      background: var(--bg-secondary);
+      border: 1px solid var(--border);
+      border-radius: calc(var(--radius) * 1.4);
+      padding: 0.85rem 1rem;
+    }
+
+    .chart-box.wide { grid-column: 1 / -1; }
+
+    .chart-title {
+      font-family: var(--font-micro);
+      font-size: 0.68rem;
+      font-weight: 600;
+      color: var(--text-muted);
+      opacity: 0.75;
+      text-transform: uppercase;
+      letter-spacing: 0.18em;
+      margin-bottom: 0.6rem;
+    }
+
+    /* Fixed chart heights — Chart.js runs with maintainAspectRatio: false */
+    .chart-canvas { position: relative; height: 215px; }
+    .chart-canvas.short { height: 150px; }
+    .chart-canvas.small { height: 185px; }
+
+    /* Activity is global — the per-project sidebar is dead weight there */
+    body.activity-view .sidebar { display: none; }
+
+    /* Recently touched projects */
+    .recent-projects { padding-bottom: 0.4rem; }
+
+    .recent-row {
+      display: grid;
+      grid-template-columns: minmax(180px, 1.4fr) 5.5rem 4.5rem 7.5rem 4.5rem 1fr;
+      gap: 0.75rem;
+      align-items: center;
+      padding: 0.4rem 0.5rem;
+      margin: 0 -0.5rem;
+      border-top: 1px solid var(--grid);
+      border-radius: calc(var(--radius) * 0.6);
+      font-size: 0.82rem;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+
+    .recent-row:hover { background: var(--bg-tertiary); }
+    .recent-row:first-of-type { border-top: none; }
+    .recent-row.copied .recent-age { color: var(--green); }
+
+    .recent-name {
+      font-family: var(--font-micro);
+      font-weight: 500;
+      color: var(--text);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .recent-path {
+      color: var(--text-muted);
+      opacity: 0.7;
+      font-weight: 400;
+    }
+
+    .recent-num {
+      font-family: var(--font-mono);
+      font-variant-numeric: tabular-nums;
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      text-align: right;
+      white-space: nowrap;
+    }
+
+    .recent-num.bright { color: var(--text); }
+
+    .recent-bar-track {
+      height: 4px;
+      border-radius: 2px;
+      background: var(--grid);
+      overflow: hidden;
+    }
+
+    .recent-bar-fill {
+      height: 100%;
+      border-radius: 2px;
+      background: var(--brand-bg);
+    }
   </style>
 </head>
 <body>
@@ -952,7 +1213,8 @@ const dashboardHtml = `
 
     <main class="content">
       <div class="tabs" id="tabs">
-        <div class="tab active" data-tab="decisions">Decisions <span class="tab-badge" id="decisions-count">0</span></div>
+        <div class="tab active" data-tab="activity">Activity</div>
+        <div class="tab" data-tab="decisions">Decisions <span class="tab-badge" id="decisions-count">0</span></div>
         <div class="tab" data-tab="insights">Insights <span class="tab-badge" id="insights-count">0</span></div>
         <div class="tab" data-tab="gotchas">Gotchas <span class="tab-badge" id="gotchas-count">0</span></div>
         <div class="tab" data-tab="quotes">Quotes <span class="tab-badge" id="quotes-count">0</span></div>
@@ -960,17 +1222,19 @@ const dashboardHtml = `
       </div>
 
       <div class="fragments-container" id="fragments">
-        <div class="empty-state">Select a project to view fragments</div>
+        <div class="empty-state">Loading activity…</div>
       </div>
     </main>
   </div>
 
   <script>
     let currentProject = null;
-    let currentTab = 'decisions';
+    let currentTab = 'activity';
     let projectData = null;
     let sessionsData = [];
     let vaultArtifacts = [];
+    let activityRange = '30d';
+    let activityCharts = [];
 
     // Markdown helper - renders inline markdown safely
     function md(text) {
@@ -1014,7 +1278,7 @@ const dashboardHtml = `
       ]);
       projectData = await projectRes.json();
       sessionsData = await sessionsRes.json();
-      const vaultArtifacts = await vaultRes.json();
+      vaultArtifacts = await vaultRes.json();
 
       // Update counts
       document.getElementById('decisions-count').textContent = projectData.decisions.length;
@@ -1029,6 +1293,14 @@ const dashboardHtml = `
     // Render fragments for current tab
     function renderFragments() {
       const container = document.getElementById('fragments');
+
+      // Activity is global — no project selection required, and the
+      // per-project sidebar is irrelevant there.
+      document.body.classList.toggle('activity-view', currentTab === 'activity');
+      if (currentTab === 'activity') {
+        renderActivity(container);
+        return;
+      }
 
       if (!projectData) {
         container.innerHTML = '<div class="empty-state">Select a project to view fragments</div>';
@@ -1063,6 +1335,218 @@ const dashboardHtml = `
       // Add copy handlers
       container.querySelectorAll('.fragment-id').forEach(el => {
         el.addEventListener('click', () => copyId(el));
+      });
+    }
+
+    // Activity view — charts over /api/activity (the \`prose stats\` verb)
+    const cssVar = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+
+    function fmtAge(ms) {
+      if (ms < 60000) return Math.round(ms / 1000) + 's ago';
+      if (ms < 3600000) return Math.round(ms / 60000) + 'm ago';
+      if (ms < 86400000) return Math.round(ms / 3600000) + 'h ago';
+      return Math.round(ms / 86400000) + 'd ago';
+    }
+
+    // The 10 most recently touched projects, with activity share bars.
+    function renderRecentProjects(projects) {
+      const recent = projects.slice(0, 10);
+      if (!recent.length) return '<div class="empty-state">No projects in this window</div>';
+      const maxActive = Math.max(...recent.map(p => p.activeMs), 1);
+      const now = Date.now();
+      return recent.map(p => {
+        const name = p.cwd.split('/').filter(Boolean).pop() || p.cwd;
+        const parent = p.cwd.slice(0, p.cwd.length - name.length);
+        return \`
+          <div class="recent-row" data-cwd="\${p.cwd}" title="Click to copy: cd \${p.cwd}">
+            <div class="recent-name"><span class="recent-path">\${parent}</span>\${name}</div>
+            <div class="recent-num bright recent-age">\${fmtAge(now - new Date(p.lastActivity).getTime())}</div>
+            <div class="recent-num bright">\${(p.activeMs / 3600000).toFixed(1)}h</div>
+            <div class="recent-num">\${p.userMessages.toLocaleString()}u / \${p.assistantMessages.toLocaleString()}a</div>
+            <div class="recent-num">\${p.sessions} sess</div>
+            <div class="recent-bar-track"><div class="recent-bar-fill" style="width: \${Math.max(2, Math.round((p.activeMs / maxActive) * 100))}%"></div></div>
+          </div>
+        \`;
+      }).join('');
+    }
+
+    // Click a project row → "cd /path/to/project" lands on the clipboard.
+    function bindRecentProjectRows(container) {
+      container.querySelectorAll('.recent-row').forEach(row => {
+        row.addEventListener('click', () => {
+          navigator.clipboard.writeText('cd ' + row.dataset.cwd);
+          const age = row.querySelector('.recent-age');
+          if (!row.dataset.origAge) row.dataset.origAge = age.textContent;
+          row.classList.add('copied');
+          age.textContent = 'copied!';
+          setTimeout(() => {
+            row.classList.remove('copied');
+            age.textContent = row.dataset.origAge;
+          }, 1200);
+        });
+      });
+    }
+
+    async function renderActivity(container) {
+      container.innerHTML = '<div class="empty-state">Crunching session journals…</div>';
+
+      const res = await fetch(\`/api/activity?since=\${activityRange}\`);
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        container.innerHTML = \`<div class="empty-state">Activity failed: \${err.error || res.status}</div>\`;
+        return;
+      }
+      const data = await res.json();
+
+      const ranges = ['7d', '14d', '30d', '90d'];
+      const toolbar = \`
+        <div class="activity-toolbar">
+          \${ranges.map(r => \`<button class="range-btn \${r === activityRange ? 'active' : ''}" data-range="\${r}">\${r}</button>\`).join('')}
+          <span class="activity-scope">all projects, all sources · idle gap \${Math.round(data.idleGapMs / 60000)}m</span>
+        </div>
+      \`;
+
+      if (!data.days.length) {
+        container.innerHTML = toolbar + '<div class="empty-state">No session activity in this window</div>';
+        bindRangeButtons(container);
+        return;
+      }
+
+      const t = data.totals;
+      const hrs = (ms) => (ms / 3600000).toFixed(1);
+      container.innerHTML = \`
+        \${toolbar}
+        <div class="stat-cards">
+          <div class="stat-card"><div class="stat-card-value">\${hrs(t.activeMs)}h</div><div class="stat-card-label">active</div></div>
+          <div class="stat-card"><div class="stat-card-value purple">\${hrs(t.humanMs)}h</div><div class="stat-card-label">human</div></div>
+          <div class="stat-card" title="Average over closed days only — today is still accruing"><div class="stat-card-value plain">\${t.averages ? hrs(t.averages.activeMsPerDay) + 'h' : '—'}</div><div class="stat-card-label">avg / day</div></div>
+          <div class="stat-card"><div class="stat-card-value">\${t.peakDay ? hrs(t.peakDay.activeMs) + 'h' : '—'}</div><div class="stat-card-label">peak \${t.peakDay ? t.peakDay.day.slice(5) : 'day'}</div></div>
+          <div class="stat-card"><div class="stat-card-value green">\${t.userMessages.toLocaleString()}</div><div class="stat-card-label">user msgs</div></div>
+          <div class="stat-card"><div class="stat-card-value plain">\${t.assistantMessages.toLocaleString()}</div><div class="stat-card-label">asst msgs</div></div>
+          <div class="stat-card"><div class="stat-card-value plain">\${t.sessions}</div><div class="stat-card-label">sessions</div></div>
+          <div class="stat-card"><div class="stat-card-value plain">\${t.projects}</div><div class="stat-card-label">projects</div></div>
+        </div>
+        <div class="chart-grid">
+          <div class="chart-box wide"><div class="chart-title">Hours per day</div><div class="chart-canvas"><canvas id="chart-hours"></canvas></div></div>
+          <div class="chart-box wide"><div class="chart-title">Messages per day</div><div class="chart-canvas short"><canvas id="chart-messages"></canvas></div></div>
+          <div class="chart-box"><div class="chart-title">User messages by hour of day</div><div class="chart-canvas small"><canvas id="chart-hourhist"></canvas></div></div>
+          <div class="chart-box"><div class="chart-title">Messages by source</div><div class="chart-canvas small"><canvas id="chart-sources"></canvas></div></div>
+          <div class="chart-box wide recent-projects">
+            <div class="chart-title">Recently touched projects</div>
+            \${renderRecentProjects(data.projects)}
+          </div>
+        </div>
+      \`;
+      bindRangeButtons(container);
+      bindRecentProjectRows(container);
+
+      const wave = cssVar('--chart-active'), waveFill = cssVar('--chart-active-fill'),
+            violet = cssVar('--chart-human'), violetFill = cssVar('--chart-human-fill'),
+            green = cssVar('--chart-user'), greenFill = cssVar('--chart-user-fill'),
+            mutedLine = cssVar('--chart-asst'), mutedFill = cssVar('--chart-asst-fill'),
+            accent = cssVar('--accent'), muted = cssVar('--text-muted'),
+            grid = cssVar('--grid'), yellow = cssVar('--yellow');
+
+      Chart.defaults.color = muted;
+      Chart.defaults.borderColor = grid;
+      Chart.defaults.font.family = getComputedStyle(document.documentElement).getPropertyValue('--font-micro');
+      Chart.defaults.font.size = 10;
+
+      activityCharts.forEach(c => c.destroy());
+      activityCharts = [];
+
+      const labels = data.days.map(d => d.day.slice(5)); // MM-DD
+      const line = (label, points, color, fillColor) => ({
+        label,
+        data: points,
+        borderColor: color,
+        backgroundColor: fillColor,
+        fill: true,
+        tension: 0.35,
+        borderWidth: 2,
+        pointRadius: 0,
+        pointHoverRadius: 3,
+        pointHitRadius: 12,
+      });
+      const baseOpts = {
+        responsive: true,
+        maintainAspectRatio: false,
+        interaction: { mode: 'index', intersect: false },
+        plugins: { legend: { labels: { usePointStyle: true, pointStyle: 'circle', boxWidth: 5, boxHeight: 5 } } },
+        scales: {
+          x: { grid: { color: grid }, ticks: { maxRotation: 0, autoSkip: true, maxTicksLimit: 16 } },
+          y: { grid: { color: grid }, beginAtZero: true },
+        },
+      };
+
+      activityCharts.push(new Chart(document.getElementById('chart-hours'), {
+        type: 'line',
+        data: {
+          labels,
+          datasets: [
+            line('active (any agent)', data.days.map(d => d.activeMs / 3600000), wave, waveFill),
+            line('human (you at the keys)', data.days.map(d => d.humanMs / 3600000), violet, violetFill),
+          ],
+        },
+        options: {
+          ...baseOpts,
+          scales: {
+            ...baseOpts.scales,
+            // A day has 24 hours — pin the scale so a 16h day reads as 2/3 of
+            // a day, not as a full-height peak.
+            y: { ...baseOpts.scales.y, max: 24, ticks: { stepSize: 6 } },
+          },
+        },
+      }));
+
+      activityCharts.push(new Chart(document.getElementById('chart-messages'), {
+        type: 'line',
+        data: {
+          labels,
+          datasets: [
+            line('user', data.days.map(d => d.userMessages), green, greenFill),
+            line('assistant', data.days.map(d => d.assistantMessages), mutedLine, mutedFill),
+          ],
+        },
+        options: baseOpts,
+      }));
+
+      activityCharts.push(new Chart(document.getElementById('chart-hourhist'), {
+        type: 'line',
+        data: {
+          labels: Array.from({ length: 24 }, (_, h) => String(h).padStart(2, '0')),
+          datasets: [line('user messages', data.hourHistogram, wave, waveFill)],
+        },
+        options: { ...baseOpts, plugins: { legend: { display: false } } },
+      }));
+
+      const sourceEntries = Object.entries(t.sources).sort((a, b) => b[1] - a[1]);
+      activityCharts.push(new Chart(document.getElementById('chart-sources'), {
+        type: 'doughnut',
+        data: {
+          labels: sourceEntries.map(([s]) => s),
+          datasets: [{
+            data: sourceEntries.map(([, n]) => n),
+            backgroundColor: [wave, violet, green, yellow],
+            borderColor: cssVar('--bg-secondary'),
+            borderWidth: 2,
+          }],
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          cutout: '68%',
+          plugins: { legend: { position: 'right', labels: { usePointStyle: true, pointStyle: 'circle', boxWidth: 5, boxHeight: 5 } } },
+        },
+      }));
+    }
+
+    function bindRangeButtons(container) {
+      container.querySelectorAll('.range-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          activityRange = btn.dataset.range;
+          renderActivity(document.getElementById('fragments'));
+        });
       });
     }
 
@@ -1325,6 +1809,7 @@ const dashboardHtml = `
 
     // Init
     loadProjects();
+    renderFragments();
   </script>
 </body>
 </html>

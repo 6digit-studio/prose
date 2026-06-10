@@ -76,17 +76,23 @@ import { whisper } from './whisper.js';
 import { gossip } from './gossip.js';
 import { standup, parseDuration } from './standup.js';
 import { grep } from './grep.js';
+import { stats, renderCsv } from './stats.js';
 import { session, SessionAmbiguousError, SessionNotFoundError } from './session.js';
 import { setBaton, listBatons, clearBatons, renderBatonLine } from './baton.js';
 import type { SourceType } from './session-parser.js';
 import * as logger from './logger.js';
+import { createRequire } from 'module';
+
+// Single source of truth for the version — the hardcoded string drifted
+// (`prose --version` reported 0.4.0 while the package shipped 0.8.0).
+const pkg = createRequire(import.meta.url)('../package.json') as { version: string };
 
 const program = new Command();
 
 program
   .name('prose')
   .description('Semantic memory for AI development - extract, evolve, and query the meaning of your collaboration')
-  .version('0.4.0')
+  .version(pkg.version)
   .option('--api-key <key>', 'Override LLM API key')
   .option('-v, --verbose', 'Show detailed progress')
   .option('-q, --quiet', 'Suppress unnecessary output')
@@ -1933,6 +1939,74 @@ program
   });
 
 // ============================================================================
+// stats - Quantitative readout over the parsed session stream (no LLM)
+// ============================================================================
+
+program
+  .command('stats')
+  .description('Per-day activity metrics across all agent sessions (Claude Code CLI, ACP, Codex, opencode, Cursor): active hours, message volumes, session/project counts, hour-of-day histogram. Global by default — all cwds. Active time merges message timestamps with an idle-gap cutoff; "human" counts user messages only.')
+  .option('--since <duration>', 'Time window for inclusion: e.g. 4h, 7d, 2h30m (default 30d)')
+  .option('--idle-gap <duration>', 'Gap above which activity splits into separate intervals (default 15m)')
+  .option('--source <type>', 'Restrict to a source: claude-code | codex | opencode | cursor (repeatable)', (v: string, prev: string[] = []) => [...prev, v])
+  .option('--cwd <path>', 'Restrict to one cwd (default: all cwds)')
+  .option('--max-sessions <n>', 'Cap on sessions parsed (performance guardrail, default 2000)', (v) => parseInt(v, 10))
+  .option('--include-sdk-cli', 'Include sdk-cli sessions (Claude Code automation)')
+  .option('--no-cache', 'Bypass the per-file stamp cache (OS temp dir) and re-parse every session file')
+  .option('--json', 'Emit full JSON (day buckets, project list, totals, histogram) instead of the table')
+  .option('--csv', 'Emit day buckets as CSV for external graphing')
+  .action((options) => {
+    let sinceMs: number | undefined;
+    let idleGapMs: number | undefined;
+    try {
+      if (options.since) sinceMs = parseDuration(options.since);
+      if (options.idleGap) idleGapMs = parseDuration(options.idleGap);
+    } catch (err) {
+      logger.error(err instanceof Error ? err.message : String(err));
+      process.exit(1);
+    }
+
+    let sources: SourceType[] | undefined;
+    if (options.source && Array.isArray(options.source)) {
+      const valid: SourceType[] = ['claude-code', 'codex', 'opencode', 'cursor'];
+      const bad = options.source.filter((s: string) => !valid.includes(s as SourceType));
+      if (bad.length > 0) {
+        logger.error(`Unknown --source value(s): ${bad.join(', ')}. Valid: ${valid.join(', ')}.`);
+        process.exit(1);
+      }
+      sources = options.source as SourceType[];
+    }
+
+    const result = stats({
+      cwd: options.cwd,
+      sources,
+      sinceMs,
+      idleGapMs,
+      maxSessions: options.maxSessions,
+      includeSdkCli: options.includeSdkCli === true,
+      cache: options.cache !== false, // commander: --no-cache sets options.cache = false
+    });
+
+    if (options.json) {
+      process.stdout.write(JSON.stringify(result, null, 2) + '\n');
+      return;
+    }
+
+    if (result.days.length === 0) {
+      process.stderr.write(`No session activity found in the last ${options.since ?? '30d'}.\n`);
+      process.exit(1);
+    }
+
+    if (options.csv) {
+      process.stdout.write(renderCsv(result.days));
+      return;
+    }
+
+    process.stdout.write(result.text);
+    const trail = `\n# stats: ${result.totals.activeDays} day(s), ${result.sessionsScanned} session(s) scanned, ${result.cacheHits} file(s) from cache${result.truncated ? ' (truncated by --max-sessions)' : ''}\n`;
+    process.stderr.write(trail);
+  });
+
+// ============================================================================
 // session - Verbatim readout of a single session by id (or id prefix)
 // ============================================================================
 
@@ -2127,15 +2201,20 @@ batonCmd
 
 batonCmd
   .command('list', { isDefault: true })
-  .description('Show batons — latest per project/type by default.')
-  .option('--cwd <path>', 'Scope to one project')
+  .description('Show batons — latest per type for the current project by default (--global for all).')
+  .option('--cwd <path>', 'Scope to a specific project (default: the current directory)')
+  .option('--global', 'Show batons across every project, not just this one')
   .option('--type <label>', 'Filter to one type')
   .option('--history', 'Show full history instead of latest-per-project/type')
   .option('--limit <n>', 'Cap the number shown', (v) => parseInt(v, 10))
   .option('--json', 'Emit JSON')
   .action((options) => {
+    // Default to the current project — a baton is a "you are here," and you
+    // almost always want *this* garden's, the same way `snap` defaults to cwd.
+    // `--global` opts into the cross-project view; an explicit `--cwd` wins.
+    const cwd = options.global ? undefined : (options.cwd ?? process.cwd());
     const batons = listBatons({
-      cwd: options.cwd,
+      cwd,
       type: options.type,
       history: options.history === true,
       limit: options.limit,

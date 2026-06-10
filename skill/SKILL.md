@@ -1,6 +1,6 @@
 ---
 name: prose
-description: ALWAYS CHECK FIRST when you need to orient on recent work or find a specific thing said in a past session. `prose` is a near-stateless CLI that reads agent session journals (Claude Code CLI, ACP, Codex, opencode, Cursor). Four read verbs (`snap`, `whisper`, `grep`, `session`) are pure-verbatim; two compaction verbs (`gossip`, `standup`) layer one cheap LLM pass on top; one stateful verb (`baton`) persists "you are here" markers. Don't say "I don't remember" or guess from filenames before running prose. Use `grep` when the user references a specific phrase, term, file, or quote from a past session. Use `session <id>` to drill into a specific session — the ids printed in snap/whisper headers are direct handles. Use `baton set` to leave a sign-off for the next session and `baton` to read the latest. Also fire when the user mentions prose itself ("look at prose", "show me prose", "does prose work", "try prose") — default to `snap`, never dump `--help` and ask what to do.
+description: ALWAYS CHECK FIRST when you need to orient on recent work or find a specific thing said in a past session. `prose` is a near-stateless CLI that reads agent session journals (Claude Code CLI, ACP, Codex, opencode, Cursor). Five read verbs (`snap`, `whisper`, `grep`, `session`, `stats`) are pure — no LLM; two compaction verbs (`gossip`, `standup`) layer one cheap LLM pass on top; one stateful verb (`baton`) persists "you are here" markers. Don't say "I don't remember" or guess from filenames before running prose. Use `grep` when the user references a specific phrase, term, file, or quote from a past session. Use `session <id>` to drill into a specific session — the ids printed in snap/whisper headers are direct handles. Use `baton set` to leave a sign-off for the next session and `baton` to read the latest. Also fire when the user mentions prose itself ("look at prose", "show me prose", "does prose work", "try prose") — default to `snap`, never dump `--help` and ask what to do.
 ---
 
 # prose — Stateless Inspection Over Your Agent Journal
@@ -35,9 +35,10 @@ Two axes: **scope** (how wide a net) and **compaction** (verbatim or LLM paragra
 | neighborhood (project family)| `whisper`        | `gossip`       |
 | all cwds, time-windowed      | —                | `standup`      |
 | all cwds, regex-targeted     | `grep`           | —              |
+| all cwds, quantitative       | `stats`          | —              |
 | 1 session by id              | `session`        | —              |
 
-Read verbs (`snap`, `whisper`, `grep`, `session`) are pure — no LLM, no API key, instant, free. Compaction verbs (`gossip`, `standup`) layer one streaming LLM pass on top.
+Read verbs (`snap`, `whisper`, `grep`, `session`, `stats`) are pure — no LLM, no API key, instant, free. Compaction verbs (`gossip`, `standup`) layer one streaming LLM pass on top.
 
 ## Pick the right verb
 
@@ -68,6 +69,13 @@ Read verbs (`snap`, `whisper`, `grep`, `session`) are pure — no LLM, no API ke
 - `-F` for literal strings, `-i` for case-insensitive, `-C N` / `-A N` / `-B N` for context windows, `-m N` to cap matches.
 - Cheap: filesystem read + in-memory regex, zero token spend.
 
+**`stats`** — Per-day activity metrics across all sessions, no LLM.
+- Use when the question is *quantitative*: "how much did I work this week," "how many sessions/projects per day," "what hours am I active." Not for content — no message text in the output.
+- Per local-calendar-day: active hours (message timestamps merged with a 15m idle-gap cutoff), "human" hours (user messages only — presence, not agent runtime), user/assistant message counts, distinct sessions and projects, plus an hour-of-day histogram.
+- Default scope is global (all cwds), last 30 days. Use `--cwd`, `--source`, `--since`, `--idle-gap` to narrow or tune.
+- `--csv` emits day rows for spreadsheets/plotting; `--json` for the full structure.
+- Cheap: filesystem read + counting, zero token spend.
+
 **`session <id>`** — Verbatim readout of one specific session, no LLM.
 - The drill-down companion to snap/whisper/grep. When those verbs print `=== Claude Code session 72a5eed3 ===`, pass that prefix (or any unique prefix) to `prose session 72a5eed3` to read the whole session.
 - Accepts any unambiguous id prefix; errors clearly on no-match (exit 1) or ambiguous-match (exit 2 with the candidate list).
@@ -83,12 +91,13 @@ Need raw text across the project family?  → prose whisper
 Need a paragraph about the family?        → prose gossip
 Need "what did I do this week"?           → prose standup
 Need to find a specific phrase/term/quote? → prose grep "..."
+Need numbers (hours, volumes, cadence)?    → prose stats
 Have an id from snap/whisper/grep?         → prose session <id>
 ```
 
 ## Multi-source by default
 
-`snap`, `whisper`, and `grep` read the **union** of:
+`snap`, `whisper`, `grep`, and `stats` read the **union** of:
 - Claude Code CLI sessions in `~/.claude/projects/`
 - Brain-persona ACP sessions (claude-agent-acp writes the same JSONL format to the same path)
 - Codex CLI sessions in `~/.codex/sessions/`
@@ -139,6 +148,10 @@ prose grep "..." --json                   # structured matches with line numbers
 prose session 72a5eed3                    # full readout of one session by id-prefix
 prose session 72a5eed3 --turns 20         # tail the last 20 messages of that session
 prose session 72a5eed3 --json             # structured: metadata + full text
+prose stats                               # per-day activity table, all cwds, last 30d
+prose stats --since 7d --cwd /path/here   # one project, last week
+prose stats --csv > activity.csv          # day rows for plotting
+prose stats --json                        # full structure: days, totals, histogram
 ```
 
 `prose --help` is the canonical flag reference. Don't memorize defaults — they evolve.

@@ -12,20 +12,26 @@ Turn months of session logs into structured **Decisions**, **Insights**, and **N
 
 ### 👁️‍🗨️ Sensory Verbs — short-term, stateless inspection
 
-Two pure read verbs (no LLM, instant, free) and two LLM-compaction verbs (one cheap pass, pennies):
+Five pure read verbs (no LLM, instant, free) and two LLM-compaction verbs (one cheap pass, pennies):
 
-|                                | verbatim     | LLM compaction |
-|--------------------------------|--------------|----------------|
-| 1 cwd                          | **`snap`**   | —              |
-| neighborhood (project family)  | **`whisper`**| **`gossip`**   |
-| all cwds, time-windowed        | —            | **`standup`**  |
+|                                | verbatim      | LLM compaction |
+|--------------------------------|---------------|----------------|
+| 1 cwd                          | **`snap`**    | —              |
+| neighborhood (project family)  | **`whisper`** | **`gossip`**   |
+| all cwds, time-windowed        | —             | **`standup`**  |
+| all cwds, regex-targeted       | **`grep`**    | —              |
+| all cwds, quantitative         | **`stats`**   | —              |
+| 1 session by id                | **`session`** | —              |
 
 - **`prose snap`** — verbatim tail of recent sessions in this cwd. No LLM.
 - **`prose whisper`** — verbatim tail across this repo and its conceptual sibling repos (auto-detected by name — e.g. `6digit-studio` brings the entire `6digit-*` family). No LLM.
 - **`prose gossip`** — one short paragraph over a `whisper`. Casual register, like a colleague catching you up.
 - **`prose standup`** — cross-project standup of your week, grouped by repo. Formal daily-standup register.
+- **`prose grep`** — regex search across the parsed session stream (not files on disk). Grep-style context lines.
+- **`prose stats`** — per-day activity metrics: active hours, message volumes, sessions, projects, hour-of-day histogram. `--csv` for plotting.
+- **`prose session <id>`** — full verbatim readout of one session by id prefix (the ids printed in snap/whisper/grep headers).
 
-All four support `--json` for machine-readable output. Pure read-side, zero state, callable from anywhere. ([Sensory Verbs ↓](#%EF%B8%8F%EF%B8%8F-sensory-verbs--cheap-stateless-inspection))
+All of them support `--json` for machine-readable output. Pure read-side, zero state, callable from anywhere. ([Sensory Verbs ↓](#%EF%B8%8F%EF%B8%8F-sensory-verbs--cheap-stateless-inspection))
 
 Every verb works over the **same journal** — so a `gossip` shows what your terminal CLI, your editor's ACP integration, and your Codex sessions have all been doing across the family, in one go.
 
@@ -99,12 +105,16 @@ Prose takes your security seriously:
 
 ## 👁️‍🗨️ Sensory Verbs — Cheap, Stateless Inspection
 
-Beyond evolution, Prose ships four pure read-side verbs for orienting on recent activity without retracing. Two are pure verbatim (no LLM, no API key, instant); two layer one cheap LLM pass on top:
+Beyond evolution, Prose ships a family of read-side verbs for orienting on recent activity without retracing. Five are pure reads (no LLM, no API key, instant); two layer one cheap LLM pass on top:
 
 - **`prose snap`** — Verbatim tail of recent sessions in the current cwd. No LLM. JSON or plain text. Cheap, instant. The raw sensory input.
 - **`prose whisper`** — Verbatim tail across the cwd **and its conceptual sibling repos** (a "project family"). No LLM — just `snap` widened to the whole family. Use this as the verbatim source for your own pipelines.
 - **`prose gossip`** — One short LLM paragraph over a `whisper`. Casual register — colleague catching you up over coffee. Pennies per call.
 - **`prose standup`** — Cross-project standup. 7-day window by default, last 10 messages per active session, grouped by project. A single LLM pass gives you a tight project-by-project narrative of your week. Formal register — daily-standup tone, "what changed / what's next."
+- **`prose grep`** — Regex search across the **parsed session stream** — the words your agents actually said, not files on disk. Multiple patterns OR-alternate; output is grep-style with line numbers and ±N context lines. Global by default; `--cwd`, `--source`, `--since` to narrow.
+- **`prose stats`** — Per-day activity metrics across every session: active hours (message timestamps merged with an idle-gap cutoff), "human" hours (user messages only), message volumes, distinct sessions and projects, and an hour-of-day histogram. `--csv` emits day rows for plotting; answers "how much am I actually doing this?"
+- **`prose session <id>`** — Full verbatim readout of one session. Any unique id prefix works — the 8-char ids printed in snap/whisper/grep headers are direct handles.
+- **`prose baton`** — The one deliberately *stateful* verb: leave a typed "you are here" marker at sign-off (`prose baton set "↪ HANDOFF: …"`), read it back next session. Batons ride snap/whisper output as a header for free.
 
 Every verb supports `--json` for machine-readable output: the verbatim verbs return structured snap/whisper objects (text + per-session metadata + per-member blocks); the LLM verbs return the same plus the emitted paragraph as a field instead of streaming.
 
@@ -126,6 +136,8 @@ Because these verbs read the same persistent journal that every Claude Code surf
 - Terminal Claude Code sessions
 - Brain-persona ACP sessions (via claude-agent-acp)
 - Codex sessions (`~/.codex/sessions/`)
+- opencode sessions (`~/.local/share/opencode/opencode.db`)
+- Cursor agent transcripts (`~/.cursor/projects/<cwd>/agent-transcripts/`)
 
 `whisper` (or `gossip`) a directory and you see what *all* your agents — across surfaces — have been doing there. The boundary between "I typed it in a terminal" and "a brain persona ran an ACP turn" mostly disappears.
 

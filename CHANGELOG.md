@@ -5,6 +5,26 @@ All notable changes to `@6digit/prose` are documented here.
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project follows [Semantic Versioning](https://semver.org/), with the caveat that pre-1.0 minor bumps may include breaking changes.
 
+## [0.9.0] — 2026-06-10
+
+### Added
+
+- **`stats` verb — quantitative readout over the session journals.** Per-local-day activity metrics across all sources (Claude Code CLI, ACP, Codex, opencode, Cursor): active hours, message volumes, distinct sessions/projects, and an hour-of-day histogram. Active time is the union of message timestamps merged with an idle-gap cutoff (default 15m, `--idle-gap` to tune), sliced at local midnight, reported on two tracks: `active` (any agent was working) and `human` (user messages only — presence at the keys). Parallel sessions union rather than double-count; a lone message contributes zero width. `--csv` emits day rows for plotting, `--json` the full structure.
+- **Per-project breakdown.** `StatsResult.projects` lists every project in the window ordered by last activity (per-project gap-merged hours, message counts, sessions, sources); the CLI table and dashboard surface the 10 most recent.
+- **Peak day and closed-day averages.** `totals.peakDay` is the busiest day by active time (today may win — a partial day can only undercount). `totals.averages` runs over *closed* days only, so the still-accruing current day never dilutes the average.
+- **Per-file stamp cache.** Parsing ~600 session files cost ~6.5s; the cache cuts warm runs to ~0.5s. Entries live in the OS temp dir keyed on file size + mtime — journals are append-only, so a hit is byte-identical to a fresh parse (exact, not TTL-stale). `--no-cache` bypasses; the trail reports hit counts.
+- **Activity dashboard.** `prose serve` opens onto a new Activity tab: range switcher (7/14/30/90d), summary stat cards, hours-per-day and messages-per-day area charts (hours pinned to a 0–24 scale), hour-of-day histogram, source split, and a recently-touched-projects panel where clicking a row copies `cd /path/to/project` to the clipboard. Backed by a new `/api/activity` endpoint (`?since=`, `?idleGap=`, `?cwd=`, `?refresh=1`).
+
+### Changed
+
+- **Dashboard restyled in the Intranquil design language** (violet theme): saturated violet ground, translucent pink borders, violet→pink brand gradient, and four type roles — Space Grotesk display, Sora body, JetBrains Mono for tabular readouts, Inter micro-caps for chrome. The artifact viewer is retokened to match. Content column centered at 1280px; the project sidebar hides on the Activity tab (it's global).
+- README sensory-verb sections brought current — they were frozen at 0.5.0 and missing `grep`, `session`, `baton`, and the opencode/Cursor sources.
+
+### Fixed
+
+- `prose --version` reported a hardcoded `0.4.0`; it now reads the version from package.json.
+- A `const` shadowing bug in the dashboard made the Sessions tab's "Verbatim Artifacts" section unrenderable.
+
 ## [0.7.0] — 2026-05-06
 
 ### Added
