@@ -78,6 +78,7 @@ import { standup, parseDuration } from './standup.js';
 import { grep } from './grep.js';
 import { stats, renderCsv } from './stats.js';
 import { session, SessionAmbiguousError, SessionNotFoundError } from './session.js';
+import { tail, NoSessionForCwdError } from './tail.js';
 import { setBaton, listBatons, clearBatons, renderBatonLine } from './baton.js';
 import type { SourceType } from './session-parser.js';
 import * as logger from './logger.js';
@@ -2058,6 +2059,37 @@ program
     process.stdout.write(result.text);
     const trail = `\n# session: ${result.messagesIncluded}/${result.messageCount} message(s), ${result.bytes} bytes, ${result.sourceType}\n`;
     process.stderr.write(trail);
+  });
+
+// ============================================================================
+// tail - Follow a live session as it grows
+// ============================================================================
+
+program
+  .command('tail [id]')
+  .description('Follow a live session as it grows — verbatim, no LLM. With an id prefix, pins that session; with none, picks the most recent session for the cwd (--cwd to point elsewhere, --any for globally newest). Initial backlog then each new message as it lands. The observation deck for watching another agent work.')
+  .option('--turns <n>', 'Initial backlog: last N messages before following (default 10)', (v) => parseInt(v, 10))
+  .option('--interval <ms>', 'Poll interval in milliseconds (default 2000)', (v) => parseInt(v, 10))
+  .option('--max-message-bytes <n>', 'Per-message byte cap (default 4096; 0 = full firehose)', (v) => parseInt(v, 10))
+  .option('--cwd <path>', 'With no id: pick the newest session for this cwd (default: current directory)')
+  .option('--any', 'With no id: pick the globally newest session, any cwd')
+  .action(async (id: string | undefined, options) => {
+    try {
+      await tail(id, {
+        turns: options.turns,
+        intervalMs: options.interval,
+        maxMessageBytes: options.maxMessageBytes,
+        cwd: options.cwd,
+        any: options.any,
+      });
+    } catch (err) {
+      if (err instanceof SessionAmbiguousError || err instanceof SessionNotFoundError || err instanceof NoSessionForCwdError) {
+        process.stderr.write(err.message + '\n');
+        process.exit(err instanceof SessionAmbiguousError ? 2 : 1);
+      }
+      logger.error(err instanceof Error ? err.message : String(err));
+      process.exit(1);
+    }
   });
 
 // ============================================================================

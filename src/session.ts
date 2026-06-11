@@ -125,7 +125,7 @@ function sourceLabel(t: NonNullable<SessionFile['sourceType']>): string {
   }
 }
 
-function collectAllSessionFiles(): SessionFile[] {
+export function collectAllSessionFiles(): SessionFile[] {
   // No projectPath filter on any source — we want the full id-space.
   const claude = discoverSessionFiles();
   const codex = discoverCodexSessionFiles();
@@ -148,7 +148,7 @@ function collectAllSessionFiles(): SessionFile[] {
   return [...claude, ...codex, ...opencode, ...cursor, ...antigravity];
 }
 
-function parseByType(f: SessionFile): Conversation {
+export function parseByType(f: SessionFile): Conversation {
   if (f.sourceType === 'codex') return parseCodexSessionFile(f.path);
   if (f.sourceType === 'opencode') return parseOpencodeSessionFile(f.path);
   if (f.sourceType === 'cursor') return parseCursorSessionFile(f.path);
