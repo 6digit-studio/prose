@@ -1,122 +1,43 @@
 # Prose 🧠
 
-### **Your AI agent forgets the "Why". Prose helps it remember — and helps you catch up in seconds.**
+### **Your AI agents already write a journal. Prose reads it — so you catch up in seconds, not scrollback.**
 
 > [!WARNING]
 > **EXPERIMENTAL**: Some operations run LLM passes over your session history. Defaults are designed to be cheap (Gemini Flash, byte-budgeted), but be deliberate before automating aggressive multi-pass workflows.
 
-Prose is a **universal semantic memory layer** for AI-driven engineering. It reads the journal your agents already write — Claude Code (CLI + ACP), Codex, and more — and gives you two complementary surfaces on top of it:
+Prose is a **universal semantic memory layer** for AI-driven engineering. It reads the journals your agents already write — Claude Code (CLI + ACP), Codex, opencode, and Cursor — and gives you three surfaces on top of them:
 
-### 🧬 Evolution — long-term compression
-Turn months of session logs into structured **Decisions**, **Insights**, and **Narrative** fragments. Persistent, searchable, distilled. The "why" behind everything you've built. ([How Evolution Works ↓](#-how-evolution-works))
-
-### 👁️‍🗨️ Sensory Verbs — short-term, stateless inspection
-
-Five pure read verbs (no LLM, instant, free) and two LLM-compaction verbs (one cheap pass, pennies):
-
-|                                | verbatim      | LLM compaction |
-|--------------------------------|---------------|----------------|
-| 1 cwd                          | **`snap`**    | —              |
-| neighborhood (project family)  | **`whisper`** | **`gossip`**   |
-| all cwds, time-windowed        | —             | **`standup`**  |
-| all cwds, regex-targeted       | **`grep`**    | —              |
-| all cwds, quantitative         | **`stats`**   | —              |
-| 1 session by id                | **`session`** | —              |
-
-- **`prose snap`** — verbatim tail of recent sessions in this cwd. No LLM.
-- **`prose whisper`** — verbatim tail across this repo and its conceptual sibling repos (auto-detected by name — e.g. `6digit-studio` brings the entire `6digit-*` family). No LLM.
-- **`prose gossip`** — one short paragraph over a `whisper`. Casual register, like a colleague catching you up.
-- **`prose standup`** — cross-project standup of your week, grouped by repo. Formal daily-standup register.
-- **`prose grep`** — regex search across the parsed session stream (not files on disk). Grep-style context lines.
-- **`prose stats`** — per-day activity metrics: active hours, message volumes, sessions, projects, hour-of-day histogram. `--csv` for plotting.
-- **`prose session <id>`** — full verbatim readout of one session by id prefix (the ids printed in snap/whisper/grep headers).
-
-All of them support `--json` for machine-readable output. Pure read-side, zero state, callable from anywhere. ([Sensory Verbs ↓](#%EF%B8%8F%EF%B8%8F-sensory-verbs--cheap-stateless-inspection))
-
-Every verb works over the **same journal** — so a `gossip` shows what your terminal CLI, your editor's ACP integration, and your Codex sessions have all been doing across the family, in one go.
-
----
-
-## 🧬 How Evolution Works
-
-Prose uses a unique two-stage evolution process to turn ephemeral chat history into consolidated technical wisdom.
-
-### 1. Vertical Evolution (The Scribe)
-Immediately after a development session, Prose performs **Vertical Evolution**. It transitions from raw, noisy logs into structured **Fragments**:
-- **⚖️ Decisions**: The "why" behind architectural pivots and design choices.
-- **💡 Insights**: Hard-won learnings, library "gotchas," and contextual patterns.
-- **📖 Narrative**: The human story of the development arc—beats, breakthroughs, and quotes.
-
-### 2. Horizontal Evolution (The Sage)
-As you move across sessions, Prose performs **Horizontal Evolution**. It synthesizes months of work into a sharp, high-density baseline:
-- **Noise Reduction**: Old, stale data ages out naturally.
-- **Conflict Resolution**: Reconciles conflicting insights from different sessions.
-- **Global Context**: Integrates architectural constraints from **Linked Projects**.
-
----
-
-## ⚡ Sidecar Evolution Architecture
-
-Prose is designed as a **Sidecar Evolution** engine. It doesn't interfere with your main development flow, but runs alongside it. 
-
-Because it operates on snapshots and logs, it is perfectly suited for **fast, low-latency, and hyper-cheap models** like **Gemini 3 Flash**. This allows Prose to perform deep, multi-pass synthesis for pennies, making "infinite" project memory commercially viable.
-
-### 🔌 Multi-Source Agnostic
-Prose isn't just for Claude Code. It already features deep integration with:
-- **Claude Code (CLI)**: Native session log parsing.
-- **Claude Code (ACP)**: Brain personas and editor integrations that drive Claude through the Agent Client Protocol write the same JSONL format to the same path — so they're surfaced for free.
-- **Codex**: Native parsing of Codex CLI session rollouts (`~/.codex/sessions/`).
-- **Antigravity**: Intelligent artifact and plan discovery.
-- **Extensible**: We are committed to adding more sources (PRs welcome!) to feed the evolution loop.
-
----
-
-## ✨ Why Prose?
-
-### 🧠 Stop Explaining, Start Building
-Prose automatically injects your project's evolved memory into your agent's environment (via `CLAUDE.md`). Your agent wakes up every session already knowing what we decided yesterday and why.
-
-### 🌎 The Global Brain (Vault)
-Your wisdom shouldn't be repo-locked. Prose maintains a Git-backed **Personal Memory Vault** at `~/.prose`. You can search across every project you've ever touched to recall a specific solution or a forgotten refactor.
-
-### 🔎 Hybrid Semantic Search
-Powered by **Jina Embeddings v4**, search queries your history using a sophisticated hybrid engine:
-- **Meaning**: Finds results semantically similar to your query.
-- **Recency**: Prioritizes the latest contexts so your trajectory stays sharp.
-- **Keyword**: Exact term matching for technical precision.
-
-### 💻 Source-Aware Intelligence
-Prose doesn't just remember what you said; it understands what you **built**:
-- **Semantic Source Indexing**: Use `prose index source` to vectorize your actual codebase.
-- **Code-Aware Chunking**: Chunks are generated based on function/class boundaries for higher-precision retrieval.
-- **Dedicated Storage**: Implementation vectors live in `.source-vectors.json`, keeping your architectural memory clean.
-- **Staleness Detection**: Uses Git HEAD tracking and content hashing to ensure you only spend tokens when code actually changes.
-
-### 🎨 Intelligent Design
-Prose is "Human-in-the-Loop." You can steer the consciousness directly by dedicating a session to "Manual Correction." The evolution engine treats these human-authored sessions as absolute ground truth.
-
-### 🛡️ Security by Design
-Prose takes your security seriously:
-- **Centralized Vault**: Verbatim session mirrors live in `~/.prose/mirrors/`, kept out of your project repositories by default.
-- **Redaction**: Common secrets (API keys, tokens) are automatically scrubbed from session records before storage.
-- **Gitignore Safety**: `prose init` automatically protects your local project from accidental session leakage.
+- **👁️‍🗨️ Sensory Verbs** — stateless, instant inspection of recent agent activity. Six pure read verbs (no LLM, no API key), two LLM-compaction verbs (one cheap pass, pennies), one deliberately stateful baton. These are the daily drivers.
+- **📡 Chronicle** — a live dev-feed: post freeform "beats" from a coding session to a durable log and any configured sink.
+- **🧬 Evolution** — opt-in long-term compression: turn months of session logs into structured **Decisions**, **Insights**, and **Narrative**, searchable semantically. ([How Evolution Works ↓](#-evolution--long-term-memory))
 
 ---
 
 ## 👁️‍🗨️ Sensory Verbs — Cheap, Stateless Inspection
 
-Beyond evolution, Prose ships a family of read-side verbs for orienting on recent activity without retracing. Five are pure reads (no LLM, no API key, instant); two layer one cheap LLM pass on top:
+|                                 | verbatim      | LLM compaction |
+|---------------------------------|---------------|----------------|
+| 1 cwd                           | **`snap`**    | —              |
+| neighborhood (project family)   | **`whisper`** | **`gossip`**   |
+| all cwds, time-windowed         | —             | **`standup`**  |
+| all cwds, regex-targeted        | **`grep`**    | —              |
+| all cwds, quantitative          | **`stats`**   | —              |
+| 1 session by id                 | **`session`** | —              |
+| 1 session, live (follow)        | **`tail`**    | —              |
 
-- **`prose snap`** — Verbatim tail of recent sessions in the current cwd. No LLM. JSON or plain text. Cheap, instant. The raw sensory input.
-- **`prose whisper`** — Verbatim tail across the cwd **and its conceptual sibling repos** (a "project family"). No LLM — just `snap` widened to the whole family. Use this as the verbatim source for your own pipelines.
+- **`prose snap`** — Verbatim tail of recent sessions in the current cwd. The raw sensory input.
+- **`prose whisper`** — Verbatim tail across the cwd **and its conceptual sibling repos** (a "project family"). Just `snap` widened to the whole family. Use this as the verbatim source for your own pipelines.
 - **`prose gossip`** — One short LLM paragraph over a `whisper`. Casual register — colleague catching you up over coffee. Pennies per call.
-- **`prose standup`** — Cross-project standup. 7-day window by default, last 10 messages per active session, grouped by project. A single LLM pass gives you a tight project-by-project narrative of your week. Formal register — daily-standup tone, "what changed / what's next."
+- **`prose standup`** — Cross-project standup. 7-day window by default, grouped by project. A single LLM pass gives you a tight project-by-project narrative of your week. Formal register — "what changed / what's next."
 - **`prose grep`** — Regex search across the **parsed session stream** — the words your agents actually said, not files on disk. Multiple patterns OR-alternate; output is grep-style with line numbers and ±N context lines. Global by default; `--cwd`, `--source`, `--since` to narrow.
 - **`prose stats`** — Per-day activity metrics across every session: active hours (message timestamps merged with an idle-gap cutoff), "human" hours (user messages only), message volumes, distinct sessions and projects, and an hour-of-day histogram. `--csv` emits day rows for plotting; answers "how much am I actually doing this?"
 - **`prose session <id>`** — Full verbatim readout of one session. Any unique id prefix works — the 8-char ids printed in snap/whisper/grep headers are direct handles.
+- **`prose tail [id]`** — Follow a live session as it grows: initial backlog, then each new message as it lands. With an id prefix it pins that session; with none it picks the most recent session for the cwd (`--cwd` to point elsewhere, `--any` for globally newest). The observation deck for watching another agent work.
 - **`prose baton`** — The one deliberately *stateful* verb: leave a typed "you are here" marker at sign-off (`prose baton set "↪ HANDOFF: …"`), read it back next session. Batons ride snap/whisper output as a header for free.
 
-Every verb supports `--json` for machine-readable output: the verbatim verbs return structured snap/whisper objects (text + per-session metadata + per-member blocks); the LLM verbs return the same plus the emitted paragraph as a field instead of streaming.
+Every verb supports `--json` for machine-readable output: the verbatim verbs return structured objects (text + per-session metadata + per-member blocks); the LLM verbs return the same plus the emitted paragraph as a field instead of streaming.
+
+The pure read verbs need **no API key and no setup** — `npm install`, `cd` into any project your agents have touched, and `prose snap` works.
 
 ### Project-Family Discovery (whisper / gossip)
 
@@ -129,12 +50,12 @@ Every verb supports `--json` for machine-readable output: the verbatim verbs ret
 No config, no manifest. The structure you've already encoded in your parent directory *is* the project graph. Pass `--cwd-only` to opt out and operate on a single directory.
 
 ### Stateless by Design
-These verbs hold **zero state** — no cursors, no caches, no last-run timestamps. Call them from anywhere — terminal, CI, an agent's tool fan-out, a brain persona's toolset — and always get a current answer. Statelessness is what lets multiple consumers read the same journal without coordination overhead, and it's what makes the verbs safe to embed anywhere.
+These verbs hold **zero state** — no cursors, no caches, no last-run timestamps (the lone exception, `baton`, is stateful on purpose). Call them from anywhere — terminal, CI, an agent's tool fan-out, a brain persona's toolset — and always get a current answer. Statelessness is what lets multiple consumers read the same journal without coordination overhead, and it's what makes the verbs safe to embed anywhere.
 
 ### Multi-Agent at the Inspection Layer
-Because these verbs read the same persistent journal that every Claude Code surface writes to (`~/.claude/projects/...`), they automatically include:
-- Terminal Claude Code sessions
-- Brain-persona ACP sessions (via claude-agent-acp)
+Because these verbs read the same persistent journals every agent surface writes to, they automatically include:
+- Terminal Claude Code sessions (`~/.claude/projects/...`)
+- Brain-persona ACP sessions (via claude-agent-acp — same JSONL format, same path)
 - Codex sessions (`~/.codex/sessions/`)
 - opencode sessions (`~/.local/share/opencode/opencode.db`)
 - Cursor agent transcripts (`~/.cursor/projects/<cwd>/agent-transcripts/`)
@@ -143,19 +64,41 @@ Because these verbs read the same persistent journal that every Claude Code surf
 
 ---
 
-## 🛠️ CLI-First & Agent-Native
+## 📡 Chronicle — a Live Dev-Feed
 
-Prose is built on a "No-MCP" philosophy. There's no need to configure complex Model Context Protocols or middle-ware.
+Arm a repo with a charter (`prose chronicle init`), then post freeform beats as the work happens:
 
-- **For Agents**: AI models (like Claude) can interact with Prose directly via standard `bash` commands. By injecting instructions into `CLAUDE.md`, your agent becomes self-sufficient—running `prose search` or `prose status` whenever it needs context.
-- **For Humans**: The CLI is designed for ergonomics. It's fast, colorful, and intuitive. Whether you're doing "Digital Archaeology" or just checking the current goal, you have raw power at your fingertips.
+```bash
+prose chronicle "it compiles. IT COMPILES." --emoji 🔥
+```
+
+Beats append to a durable log and emit to any configured sink (Discord first). `prose chronicle about` prints the repo's charter — what's being chronicled, and in what voice. A sign of life, not a commit log.
 
 ---
 
-## 🐶 Dogfooding in Action
+## 🧬 Evolution — Long-Term Memory
 
-We use Prose to build Prose. 
-Check out our [**CLAUDE.md**](CLAUDE.md) for a live example of an evolved Project Consciousness, distilled from the sessions that created this tool.
+The opt-in deeper layer: `prose evolve` runs LLM passes over your session history and distills it into persistent, searchable memory.
+
+### How it works
+1. **Vertical Evolution (The Scribe)** — after a session, raw noisy logs become structured fragments: **⚖️ Decisions** (the "why" behind pivots), **💡 Insights** (hard-won learnings and gotchas), **📖 Narrative** (beats, breakthroughs, quotes).
+2. **Horizontal Evolution (The Sage)** — across sessions, months of work get synthesized into a high-density baseline: stale data ages out, conflicting insights get reconciled, and architectural constraints from **Linked Projects** (`prose link`) integrate in.
+
+Evolution also ingests **git history**, **Antigravity artifacts**, and dedicated `prose design` sessions — interactive sittings with an AI architect that the engine treats as ground truth.
+
+### What you get
+- **🔎 Hybrid Semantic Search** — `prose search` queries your history with Jina Embeddings v4: meaning + recency + exact keyword matching. `prose index source` additionally vectorizes your codebase (code-aware chunking on function/class boundaries, git-HEAD staleness detection) so `prose search --source` finds the "how," not just the "why."
+- **🧠 CLAUDE.md injection** — evolved memory lands in your agent's environment, so it wakes up already knowing what you decided yesterday and why. (`prose context` generates the markdown directly.)
+- **🌎 The Personal Vault** — a Git-backed memory store at `~/.prose` (`prose vault init/status/sync`). Verbatim session mirrors live in `~/.prose/mirrors/`, out of your project repos; search spans every project you've ever touched.
+- **🖥️ A browsable timeline** — `prose serve` starts an interactive dashboard over your evolved memory; `prose web` exports it as a static HTML site; `prose artifacts` dumps session fragments as Markdown.
+
+### Sidecar economics
+Evolution runs alongside your flow, not inside it. Because it operates on snapshots and logs, it's suited to fast, hyper-cheap models like **Gemini 3 Flash** — deep multi-pass synthesis for pennies.
+
+### 🛡️ Security by Design
+- **Centralized Vault**: Verbatim mirrors stay in `~/.prose/mirrors/`, out of project repositories by default.
+- **Redaction**: Common secrets (API keys, tokens) are scrubbed from session records before storage.
+- **Gitignore Safety**: `prose init` protects your project from accidental session leakage.
 
 ---
 
@@ -163,51 +106,103 @@ Check out our [**CLAUDE.md**](CLAUDE.md) for a live example of an evolved Projec
 
 ### 1. Install
 ```bash
-npm install -g @6digit-studio/prose
+npm install -g @6digit/prose
 ```
 
-### 2. Configure
-Set your API keys. Prose decouples project reasoning from semantic search to prevent service interference.
-
+### 2. Orient — no keys needed
 ```bash
-# Required: For project reasoning & evolution
-export PROSE_API_KEY="your-llm-key"
-
-# Required: For semantic search & memory recall
-export PROSE_JINA_API_KEY="your-jina-key"
+prose snap      # what just happened here?
+prose whisper   # ...and in the sibling repos?
+prose stats     # how much am I actually doing this?
 ```
 
-### 3. Initialize & Evolve
-Start your project's consciousness:
-```bash
-prose init
-prose evolve
-prose index source # NEW: Vectorize your codebase
-```
-
-### 4. (Recommended) Install the Claude Code skill
-If you use Claude Code, install the prose skill so future sessions know how and when to reach for it:
+### 3. (Recommended) Install the Claude Code skill
 ```bash
 prose skill install
 ```
-This drops a `SKILL.md` into `~/.claude/skills/prose/`. Claude Code auto-loads it, so future agent sessions will use `prose snap`/`whisper`/`gossip`/`standup` for orientation instead of asking you to copy-paste session logs.
+This drops a `SKILL.md` into `~/.claude/skills/prose/`. Claude Code auto-loads it, so future agent sessions reach for `prose snap`/`whisper`/`gossip`/`standup` themselves instead of asking you to paste session logs.
 
-### 5. Search Implementation
-Find the "Why" (decisions) or the "How" (code) semantically:
+### 4. Add keys for the LLM verbs
 ```bash
-# Search decisions and insights
-prose search "why did we switch to gemini?"
+# For gossip / standup / evolve / design (any OpenRouter-compatible key)
+export PROSE_API_KEY="your-llm-key"      # OPENROUTER_API_KEY also works
 
-# Search actual code implementations
+# For semantic search & source indexing
+export PROSE_JINA_API_KEY="your-jina-key"
+```
+Or store them globally: `prose config set openrouter-api-key <key>` / `prose config set jina-api-key <key>`.
+
+### 5. Opt into long-term memory
+```bash
+prose init          # initialize prose in the project
+prose evolve        # distill session history into memory
+prose index source  # vectorize the codebase
+
+prose search "why did we switch to gemini?"
 prose search "how do we handle secret redaction?" --source
 ```
+
+---
+
+## 📖 Command Reference
+
+| Command | What it does |
+|---------|--------------|
+| **Orient** (pure reads — no LLM, no key) | |
+| `prose snap` | Verbatim tail of recent sessions in the cwd |
+| `prose whisper` | Verbatim tail across the project family |
+| `prose grep <pattern...>` | Regex search over the parsed session stream |
+| `prose stats` | Per-day activity metrics, `--csv` for plotting |
+| `prose session <id>` | Full verbatim readout of one session by id prefix |
+| `prose tail [id]` | Follow a live session as it grows |
+| `prose baton set/list/clear` | Persisted "you are here" handoff markers |
+| **Compact** (one cheap LLM pass) | |
+| `prose gossip` | Casual catch-up paragraph over a whisper |
+| `prose standup` | Cross-project standup, grouped by repo |
+| **Chronicle** | |
+| `prose chronicle [title]` | Post a dev beat to the log and sinks |
+| `prose chronicle init/about` | Scaffold / print the repo's charter |
+| **Memory & evolution** | |
+| `prose init` | Initialize prose in the project (`init hooks` for PreCompact) |
+| `prose evolve` | Distill session history into structured memory |
+| `prose search <query>` | Hybrid semantic search (`--source` for code) |
+| `prose add <type> <content>` | Add a fragment directly (decision, gotcha, insight, focus) |
+| `prose design` | Interactive session with the AI architect |
+| `prose merge --from <project>` | Import memory fragments from another project |
+| `prose link [target]` | Persistent cross-project context links |
+| `prose status` | Memory statistics (`status global` for all projects) |
+| `prose show [project]` | Display current fragments |
+| `prose context [project]` | Generate context markdown for injection |
+| `prose artifacts` | Export session fragments as Markdown |
+| `prose web` | Generate a static HTML site from memory |
+| `prose serve` | Interactive dashboard server for browsing the timeline |
+| `prose index backfill/source` | Generate embeddings for fragments / source code |
+| **Infrastructure** | |
+| `prose vault init/status/sync` | Git-backed personal memory vault at `~/.prose` |
+| `prose config set/show` | Global configuration (API keys, defaults) |
+| `prose skill install/uninstall/show/path` | Manage the Claude Code skill |
+
+---
+
+## 🛠️ CLI-First & Agent-Native
+
+Prose is built on a "No-MCP" philosophy. There's no need to configure complex Model Context Protocols or middleware.
+
+- **For Agents**: AI models (like Claude) interact with Prose directly via standard `bash` commands. With the skill installed, your agent becomes self-sufficient — running `prose snap` or `prose search` whenever it needs context.
+- **For Humans**: The CLI is designed for ergonomics. It's fast, colorful, and intuitive. Whether you're doing "Digital Archaeology" or just checking the current goal, you have raw power at your fingertips.
+
+---
+
+## 🐶 Dogfooding in Action
+
+We use Prose to build Prose.
+Check out our [**CLAUDE.md**](CLAUDE.md) for a live example of an evolved Project Consciousness, distilled from the sessions that created this tool.
 
 ---
 
 ## 📚 Documentation
 For detailed setup, Vault management, and advanced features, see:
 - [📖 User Guide](GUIDE.md) - Deep dive into usage and configuration.
-- [🧪 Walkthrough](https://github.com/6digit-studio/prose/blob/main/walkthrough.md) - Real-world examples of evolution in action.
 
 ## ⚖️ License
-MIT
+MIT — © 2025-2026 [6digit.studio](https://github.com/6digit-studio)

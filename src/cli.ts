@@ -1866,7 +1866,7 @@ program
 
 program
   .command('grep <pattern...>')
-  .description('Regex search across recent agent session text (Claude Code CLI, ACP, Codex, opencode). Operates on parsed session content — NOT files on disk. Multiple patterns OR-alternate. Output is grep-style with line numbers and ±N context lines.')
+  .description('Regex search across recent agent session text (Claude Code CLI, ACP, Codex, opencode, and Cursor). Operates on parsed session content — NOT files on disk. Multiple patterns OR-alternate. Output is grep-style with line numbers and ±N context lines.')
   .option('-C, --context <n>', 'Lines before and after each match (default 5)', (v) => parseInt(v, 10))
   .option('-A, --after <n>', 'Lines after each match (overrides --context for after)', (v) => parseInt(v, 10))
   .option('-B, --before <n>', 'Lines before each match (overrides --context for before)', (v) => parseInt(v, 10))
