@@ -1874,7 +1874,7 @@ program
   .option('-F, --fixed-strings', 'Treat patterns as literal strings, not regex')
   .option('-m, --max-matches <n>', 'Cap on total matches across all sessions (default 50)', (v) => parseInt(v, 10))
   .option('--max-sessions <n>', 'Cap on sessions scanned (performance guardrail, default 500)', (v) => parseInt(v, 10))
-  .option('--source <type>', 'Restrict to a source: claude-code | codex | opencode | cursor (repeatable)', (v: string, prev: string[] = []) => [...prev, v])
+  .option('--source <type>', 'Restrict to a source: claude-code | codex | opencode | cursor | pi (repeatable)', (v: string, prev: string[] = []) => [...prev, v])
   .option('--cwd <path>', 'Restrict to one cwd (default: all cwds)')
   .option('--since <duration>', 'Time window for inclusion: e.g. 30m, 4h, 1d, 2h30m (default: all time)')
   .option('--include-current', 'Include the actively-written claude-code session')
@@ -1893,7 +1893,7 @@ program
 
     let sources: SourceType[] | undefined;
     if (options.source && Array.isArray(options.source)) {
-      const valid: SourceType[] = ['claude-code', 'codex', 'opencode', 'cursor'];
+      const valid: SourceType[] = ['claude-code', 'codex', 'opencode', 'cursor', 'pi'];
       const bad = options.source.filter((s: string) => !valid.includes(s as SourceType));
       if (bad.length > 0) {
         logger.error(`Unknown --source value(s): ${bad.join(', ')}. Valid: ${valid.join(', ')}.`);
@@ -1948,7 +1948,7 @@ program
   .description('Per-day activity metrics across all agent sessions (Claude Code CLI, ACP, Codex, opencode, Cursor): active hours, message volumes, session/project counts, hour-of-day histogram. Global by default — all cwds. Active time merges message timestamps with an idle-gap cutoff; "human" counts user messages only.')
   .option('--since <duration>', 'Time window for inclusion: e.g. 4h, 7d, 2h30m (default 30d)')
   .option('--idle-gap <duration>', 'Gap above which activity splits into separate intervals (default 15m)')
-  .option('--source <type>', 'Restrict to a source: claude-code | codex | opencode | cursor (repeatable)', (v: string, prev: string[] = []) => [...prev, v])
+  .option('--source <type>', 'Restrict to a source: claude-code | codex | opencode | cursor | pi (repeatable)', (v: string, prev: string[] = []) => [...prev, v])
   .option('--cwd <path>', 'Restrict to one cwd (default: all cwds)')
   .option('--max-sessions <n>', 'Cap on sessions parsed (performance guardrail, default 2000)', (v) => parseInt(v, 10))
   .option('--include-sdk-cli', 'Include sdk-cli sessions (Claude Code automation)')
@@ -1968,7 +1968,7 @@ program
 
     let sources: SourceType[] | undefined;
     if (options.source && Array.isArray(options.source)) {
-      const valid: SourceType[] = ['claude-code', 'codex', 'opencode', 'cursor'];
+      const valid: SourceType[] = ['claude-code', 'codex', 'opencode', 'cursor', 'pi'];
       const bad = options.source.filter((s: string) => !valid.includes(s as SourceType));
       if (bad.length > 0) {
         logger.error(`Unknown --source value(s): ${bad.join(', ')}. Valid: ${valid.join(', ')}.`);

@@ -4,6 +4,7 @@ import { statSync, mkdtempSync, mkdirSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { parseSessionFile, parseSessionFileFromOffset } from './session-parser.js';
 import { parseCodexSessionFile, parseCodexSessionFileFromOffset } from './codex-session-parser.js';
+import { parsePiSessionFile } from './pi-session-parser.js';
 import { parseCursorSessionFile, decodeCursorCwd } from './cursor-session-parser.js';
 import { parseAntigravityArtifact } from './source-parsers.js';
 import type { Conversation } from './session-parser.js';
@@ -97,6 +98,34 @@ describe('Codex Parser Correctness', () => {
 
     expect(conv.messages[1].role).toBe('assistant');
     expect(conv.messages[1].content).toBe('Hello user! I am Codex.');
+  });
+});
+
+describe('pi Parser Correctness', () => {
+  const piPath = join(FIXTURES_DIR, 'pi-normal.jsonl');
+
+  test('parses pi JSONL sessions, extracting text and dropping thinking/toolCall', () => {
+    const conv = parsePiSessionFile(piPath);
+    expect(conv.sessionId).toBe('pi-session-1');
+    expect(conv.sourceType).toBe('pi');
+    // cwd from the session header line drives the project slug.
+    expect(conv.project).toBe('-Users-larsde-src-6digit-cordial');
+
+    // The empty error message (no text blocks) is dropped; only the two
+    // real turns survive.
+    expect(conv.messages).toHaveLength(2);
+
+    expect(conv.messages[0].role).toBe('user');
+    expect(conv.messages[0].content).toBe('Howdy pi');
+    expect(conv.messages[0].timestamp).toEqual(new Date('2026-06-17T08:05:07.614Z'));
+    // pi's stable per-message id becomes the messageUuid.
+    expect(conv.messages[0].source.messageUuid).toBe('c8a66cf4');
+
+    // thinking and toolCall blocks are excluded; only the text block survives.
+    expect(conv.messages[1].role).toBe('assistant');
+    expect(conv.messages[1].content).toBe('Hello user! I am pi.');
+    expect(conv.messages.some((m) => m.content.includes('internal reasoning'))).toBe(false);
+    expect(conv.messages.some((m) => m.content.includes('toolCall'))).toBe(false);
   });
 });
 

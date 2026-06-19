@@ -27,6 +27,10 @@ import {
   discoverCursorSessionFiles,
   parseCursorSessionFile,
 } from './cursor-session-parser.js';
+import {
+  discoverPiSessionFiles,
+  parsePiSessionFile,
+} from './pi-session-parser.js';
 import { readSessionCwd } from './standup.js';
 
 export interface GrepOptions {
@@ -279,7 +283,7 @@ export function grep(opts: GrepOptions): GrepResult {
   const includeCurrent = opts.includeCurrent ?? false;
   const includeSdkCli = opts.includeSdkCli ?? false;
   const sources: Set<SourceType> = new Set(
-    opts.sources ?? ['claude-code', 'codex', 'opencode', 'cursor']
+    opts.sources ?? ['claude-code', 'codex', 'opencode', 'cursor', 'pi']
   );
 
   const now = Date.now();
@@ -293,6 +297,7 @@ export function grep(opts: GrepOptions): GrepResult {
   if (sources.has('codex')) candidates.push(...discoverCodexSessionFiles());
   if (sources.has('opencode')) candidates.push(...discoverOpencodeSessionFiles());
   if (sources.has('cursor')) candidates.push(...discoverCursorSessionFiles());
+  if (sources.has('pi')) candidates.push(...discoverPiSessionFiles());
   candidates.sort((a, b) => b.modifiedTime.getTime() - a.modifiedTime.getTime());
 
   const matches: GrepMatchGroup[] = [];
@@ -322,6 +327,8 @@ export function grep(opts: GrepOptions): GrepResult {
         ? parseOpencodeSessionFile(f.path)
         : f.sourceType === 'cursor'
         ? parseCursorSessionFile(f.path)
+        : f.sourceType === 'pi'
+        ? parsePiSessionFile(f.path)
         : parseSessionFile(f.path);
     if (conv.messages.length === 0) continue;
     if (!includeSdkCli && conv.entrypoint === 'sdk-cli') continue;

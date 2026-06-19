@@ -35,6 +35,14 @@ export {
   decodeCursorCwd,
 } from './cursor-session-parser.js';
 
+// pi (pi-mono) session parsing
+export {
+  discoverPiSessionFiles,
+  parsePiSessionFile,
+  parsePiSessionFileFromOffset,
+  getPiSessionsDir,
+} from './pi-session-parser.js';
+
 // Baton service — prose-native "you are here" markers
 export {
   setBaton,

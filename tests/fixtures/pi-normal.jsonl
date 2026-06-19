@@ -1,0 +1,5 @@
+{"type":"session","version":3,"id":"pi-session-1","timestamp":"2026-06-17T08:05:04.000Z","cwd":"/Users/larsde/src/6digit-cordial"}
+{"type":"model_change","id":"feb10a73","parentId":null,"timestamp":"2026-06-17T08:05:04.005Z","provider":"openrouter","modelId":"z-ai/glm-5.2"}
+{"type":"message","id":"c8a66cf4","parentId":"e1ca5e65","timestamp":"2026-06-17T08:05:07.614Z","message":{"role":"user","content":[{"type":"text","text":"Howdy pi"}],"timestamp":1781683507612}}
+{"type":"message","id":"22745535","parentId":"c8a66cf4","timestamp":"2026-06-17T08:05:12.488Z","message":{"role":"assistant","content":[{"type":"thinking","thinking":"internal reasoning that should be dropped","thinkingSignature":"reasoning"},{"type":"text","text":"Hello user! I am pi."},{"type":"toolCall","id":"call_x","name":"bash","arguments":{"command":"ls"}}],"api":"openai-completions","provider":"openrouter","model":"z-ai/glm-5.2"}}
+{"type":"message","id":"9923e800","parentId":"22745535","timestamp":"2026-06-17T08:05:29.889Z","message":{"role":"assistant","content":[],"stopReason":"error","errorMessage":"429 rate-limited"}}

@@ -25,6 +25,10 @@ import {
   discoverCursorSessionFiles,
   parseCursorSessionFile,
 } from './cursor-session-parser.js';
+import {
+  discoverPiSessionFiles,
+  parsePiSessionFile,
+} from './pi-session-parser.js';
 import { isGitRepo, getCommitsSince, type GitCommitSummary } from './source-parsers.js';
 
 export interface StandupOptions {
@@ -213,18 +217,19 @@ export async function standup(opts: StandupOptions): Promise<StandupResult> {
   const codexFiles = discoverCodexSessionFiles();
   const opencodeFiles = discoverOpencodeSessionFiles();
   const cursorFiles = discoverCursorSessionFiles();
+  const piFiles = discoverPiSessionFiles();
   // No per-source cap here: standup is already time-windowed by mtime, so
   // Claude Code can't structurally crowd the others out the way snap's
   // flat candidate slice did. Sort by mtime, drop everything below the cutoff
   // in the parse loop.
-  const allFiles = [...claudeFiles, ...codexFiles, ...opencodeFiles, ...cursorFiles].sort(
+  const allFiles = [...claudeFiles, ...codexFiles, ...opencodeFiles, ...cursorFiles, ...piFiles].sort(
     (a, b) => b.modifiedTime.getTime() - a.modifiedTime.getTime()
   );
 
   type Kept = {
     cwd: string;
     sessionId: string;
-    sourceType: 'claude-code' | 'codex' | 'opencode' | 'cursor';
+    sourceType: 'claude-code' | 'codex' | 'opencode' | 'cursor' | 'pi';
     messages: Message[];
     lastMessageTime: Date;
   };
@@ -244,6 +249,8 @@ export async function standup(opts: StandupOptions): Promise<StandupResult> {
         ? parseOpencodeSessionFile(f.path)
         : f.sourceType === 'cursor'
         ? parseCursorSessionFile(f.path)
+        : f.sourceType === 'pi'
+        ? parsePiSessionFile(f.path)
         : parseSessionFile(f.path);
     if (conv.messages.length === 0) continue;
     if (!includeSdkCli && conv.entrypoint === 'sdk-cli') continue;
@@ -272,6 +279,8 @@ export async function standup(opts: StandupOptions): Promise<StandupResult> {
           ? 'opencode'
           : f.sourceType === 'cursor'
           ? 'cursor'
+          : f.sourceType === 'pi'
+          ? 'pi'
           : 'claude-code',
       messages: tail,
       lastMessageTime: last.timestamp,
