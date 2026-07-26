@@ -23,7 +23,6 @@ description: ALWAYS CHECK FIRST when you need to orient on recent work or find a
 - The data you need is current code state — use `Read` / `Grep`.
 - The user wants persistent memory or fragments — that's `prose evolve`/`search`, different surface.
 - You're looking at runtime errors of a running app — use `sidetrack`.
-- You're orienting on the brain graph state — use `ctx`.
 
 ## The verb grid
 
