@@ -1647,7 +1647,7 @@ program
 
 program
   .command('snap')
-  .description('Verbatim readout of recent agent sessions in the current cwd (Claude Code CLI, ACP, Codex, opencode, and Cursor). Orient without retracing.')
+  .description('Verbatim readout of recent agent sessions in the current cwd (Claude Code CLI, ACP, Codex, opencode, Cursor, pi, and OMP). Orient without retracing.')
   .option('--bytes <n>', 'Byte budget for assembled text (default 4000)', (v) => parseInt(v, 10))
   .option('--turns <n>', 'Last N messages per session (default 4)', (v) => parseInt(v, 10))
   .option('--sessions <n>', 'Max sessions to include (default 5)', (v) => parseInt(v, 10))
@@ -1690,7 +1690,7 @@ program
 
 program
   .command('whisper')
-  .description('Verbatim readout of recent agent sessions across the cwd and its conceptual sibling repos (project family). Reads Claude Code CLI, ACP, Codex, opencode, and Cursor. No LLM — pure read.')
+  .description('Verbatim readout of recent agent sessions across the cwd and its conceptual sibling repos (project family). Reads Claude Code CLI, ACP, Codex, opencode, Cursor, pi, and OMP. No LLM — pure read.')
   .option('--bytes <n>', 'Byte budget for the assembled verbatim text (default 4000)', (v) => parseInt(v, 10))
   .option('--turns <n>', 'Last N messages per session (default 4)', (v) => parseInt(v, 10))
   .option('--sessions <n>', 'Max sessions to include per repo (default: 5 for self, 2 for siblings)', (v) => parseInt(v, 10))
@@ -1797,7 +1797,7 @@ program
 
 program
   .command('standup')
-  .description('Streamed cross-project standup over recent agent activity (Claude Code CLI, ACP, Codex, opencode, and Cursor), grouped by working directory')
+  .description('Streamed cross-project standup over recent agent activity (Claude Code CLI, ACP, Codex, opencode, Cursor, pi, and OMP), grouped by working directory')
   .option('--since <duration>', 'Time window for session inclusion: e.g. 30m, 4h, 1d, 2h30m (default 7d). Window decides which sessions to surface; per-session tail length is independent.')
   .option('--turns <n>', "Last N messages per session — taken from the session's overall tail, not the in-window slice (default 10)", (v) => parseInt(v, 10))
   .option('--bytes-per-session <n>', 'Per-session byte cap on rendered tail (default 1500)', (v) => parseInt(v, 10))
@@ -1866,7 +1866,7 @@ program
 
 program
   .command('grep <pattern...>')
-  .description('Regex search across recent agent session text (Claude Code CLI, ACP, Codex, opencode, and Cursor). Operates on parsed session content — NOT files on disk. Multiple patterns OR-alternate. Output is grep-style with line numbers and ±N context lines.')
+  .description('Regex search across recent agent session text (Claude Code CLI, ACP, Codex, opencode, Cursor, pi, and OMP). Operates on parsed session content — NOT files on disk. Multiple patterns OR-alternate. Output is grep-style with line numbers and ±N context lines.')
   .option('-C, --context <n>', 'Lines before and after each match (default 5)', (v) => parseInt(v, 10))
   .option('-A, --after <n>', 'Lines after each match (overrides --context for after)', (v) => parseInt(v, 10))
   .option('-B, --before <n>', 'Lines before each match (overrides --context for before)', (v) => parseInt(v, 10))
@@ -1874,7 +1874,7 @@ program
   .option('-F, --fixed-strings', 'Treat patterns as literal strings, not regex')
   .option('-m, --max-matches <n>', 'Cap on total matches across all sessions (default 50)', (v) => parseInt(v, 10))
   .option('--max-sessions <n>', 'Cap on sessions scanned (performance guardrail, default 500)', (v) => parseInt(v, 10))
-  .option('--source <type>', 'Restrict to a source: claude-code | codex | opencode | cursor | pi (repeatable)', (v: string, prev: string[] = []) => [...prev, v])
+  .option('--source <type>', 'Restrict to a source: claude-code | codex | opencode | cursor | pi | omp (repeatable)', (v: string, prev: string[] = []) => [...prev, v])
   .option('--cwd <path>', 'Restrict to one cwd (default: all cwds)')
   .option('--since <duration>', 'Time window for inclusion: e.g. 30m, 4h, 1d, 2h30m (default: all time)')
   .option('--include-current', 'Include the actively-written claude-code session')
@@ -1893,7 +1893,7 @@ program
 
     let sources: SourceType[] | undefined;
     if (options.source && Array.isArray(options.source)) {
-      const valid: SourceType[] = ['claude-code', 'codex', 'opencode', 'cursor', 'pi'];
+      const valid: SourceType[] = ['claude-code', 'codex', 'opencode', 'cursor', 'pi', 'omp'];
       const bad = options.source.filter((s: string) => !valid.includes(s as SourceType));
       if (bad.length > 0) {
         logger.error(`Unknown --source value(s): ${bad.join(', ')}. Valid: ${valid.join(', ')}.`);
@@ -1945,10 +1945,10 @@ program
 
 program
   .command('stats')
-  .description('Per-day activity metrics across all agent sessions (Claude Code CLI, ACP, Codex, opencode, Cursor): active hours, message volumes, session/project counts, hour-of-day histogram. Global by default — all cwds. Active time merges message timestamps with an idle-gap cutoff; "human" counts user messages only.')
+  .description('Per-day activity metrics across all agent sessions (Claude Code CLI, ACP, Codex, opencode, Cursor, pi, OMP): active hours, message volumes, session/project counts, hour-of-day histogram. Global by default — all cwds. Active time merges message timestamps with an idle-gap cutoff; "human" counts user messages only.')
   .option('--since <duration>', 'Time window for inclusion: e.g. 4h, 7d, 2h30m (default 30d)')
   .option('--idle-gap <duration>', 'Gap above which activity splits into separate intervals (default 15m)')
-  .option('--source <type>', 'Restrict to a source: claude-code | codex | opencode | cursor | pi (repeatable)', (v: string, prev: string[] = []) => [...prev, v])
+  .option('--source <type>', 'Restrict to a source: claude-code | codex | opencode | cursor | pi | omp (repeatable)', (v: string, prev: string[] = []) => [...prev, v])
   .option('--cwd <path>', 'Restrict to one cwd (default: all cwds)')
   .option('--max-sessions <n>', 'Cap on sessions parsed (performance guardrail, default 2000)', (v) => parseInt(v, 10))
   .option('--include-sdk-cli', 'Include sdk-cli sessions (Claude Code automation)')
@@ -1968,7 +1968,7 @@ program
 
     let sources: SourceType[] | undefined;
     if (options.source && Array.isArray(options.source)) {
-      const valid: SourceType[] = ['claude-code', 'codex', 'opencode', 'cursor', 'pi'];
+      const valid: SourceType[] = ['claude-code', 'codex', 'opencode', 'cursor', 'pi', 'omp'];
       const bad = options.source.filter((s: string) => !valid.includes(s as SourceType));
       if (bad.length > 0) {
         logger.error(`Unknown --source value(s): ${bad.join(', ')}. Valid: ${valid.join(', ')}.`);
@@ -2013,7 +2013,7 @@ program
 
 program
   .command('session <id>')
-  .description('Verbatim readout of one session by id (accepts any unique prefix). Scans Claude Code CLI, ACP, Codex, opencode, and Cursor. No cwd filter — the id is the selector.')
+  .description('Verbatim readout of one session by id (accepts any unique prefix). Scans Claude Code CLI, ACP, Codex, opencode, Cursor, pi, and OMP. No cwd filter — the id is the selector.')
   .option('--turns <n>', 'Tail the last N messages (default: all)', (v) => parseInt(v, 10))
   .option('--since <iso>', 'Only include messages at or after this ISO timestamp')
   .option('--max-message-bytes <n>', 'Per-message byte cap; long messages get truncated with [N bytes elided] (default 0 = no clipping)', (v) => parseInt(v, 10))
@@ -2207,15 +2207,35 @@ const batonCmd = program
   .description('Persisted "you are here" batons. Bare `prose baton` lists the latest per project/type.');
 
 batonCmd
-  .command('set <content...>')
-  .description('Write a baton for the cwd. Accepts a `↪ LABEL: body` form, or set the label with --type.')
+  .command('set [content...]')
+  .description('Write a baton for the cwd. Accepts a `↪ LABEL: body` form, or set the label with --type. With no content (or `-`), reads the body from stdin — use that for long batons, since a shell will otherwise eat backticks and $() inside them.')
   .option('--type <label>', 'Baton type label (default: parsed from content, else "baton")')
   .option('--cwd <path>', 'Project the baton belongs to (default: current directory)')
   .option('--json', 'Emit the stored baton as JSON')
-  .action((content: string[], options) => {
+  .action((content: string[] | undefined, options) => {
     try {
+      const argv = content ?? [];
+      // A baton is a hand-written note whose whole value is being preserved
+      // verbatim. Passing one as shell argv silently corrupts it the moment it
+      // contains a backtick or $( — so stdin is the safe channel, and it is
+      // what you get by default when no content is on the command line.
+      const fromStdin = argv.length === 0 || (argv.length === 1 && argv[0] === '-');
+      let body: string;
+      if (fromStdin) {
+        if (process.stdin.isTTY) {
+          logger.error('baton set: no content given and stdin is a terminal — pass the body as arguments, or pipe it in');
+          process.exit(1);
+        }
+        body = readFileSync(0, 'utf8').trim();
+        if (!body) {
+          logger.error('baton set: stdin was empty');
+          process.exit(1);
+        }
+      } else {
+        body = argv.join(' ');
+      }
       const baton = setBaton({
-        content: content.join(' '),
+        content: body,
         type: options.type,
         cwd: options.cwd,
       });
