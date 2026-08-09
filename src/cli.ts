@@ -75,7 +75,7 @@ import { snap } from './snap.js';
 import { whisper } from './whisper.js';
 import { gossip } from './gossip.js';
 import { standup, parseDuration } from './standup.js';
-import { grep } from './grep.js';
+import { grep, escapeRegex } from './grep.js';
 import { stats, renderCsv } from './stats.js';
 import { session, SessionAmbiguousError, SessionNotFoundError } from './session.js';
 import { tail, NoSessionForCwdError } from './tail.js';
@@ -1858,6 +1858,27 @@ program
     const totalCommits = result.projects.reduce((sum, p) => sum + p.commitCount, 0);
     const trail = `\n# standup: ${result.sessionsIncluded} session(s), ${totalCommits} commit(s), ${result.projects.length} cwd(s) in → ${sectionCount} project(s) out, ${result.promptBytes} prompt bytes — ${projectList}\n`;
     process.stderr.write(trail);
+
+    // "17 cwd(s) in → 6 project(s) out" is arithmetic nobody reads as "eleven
+    // repos are missing from what you just read". Compaction is allowed to merge
+    // and drop; it is not allowed to do it silently. A reader asking "where were
+    // we" concludes nothing happened in a repo the report never names — so name
+    // the ones that had activity and did not make the prose.
+    const unnamed = result.projects.filter(p => {
+      const name = p.cwd.split('/').filter(Boolean).pop();
+      if (!name) return false;
+      // Bounded on both sides so a short name doesn't match a longer sibling
+      // ("6digit" must not count itself as covered by "6digit-cordial").
+      return !new RegExp(`(^|[^a-z0-9-])${escapeRegex(name)}([^a-z0-9-]|$)`, 'i').test(result.text);
+    });
+    if (unnamed.length > 0) {
+      const list = unnamed
+        .map(p => `${p.cwd.split('/').filter(Boolean).pop()} (${p.commitCount}c/${p.sessionCount}s)`)
+        .join(', ');
+      process.stderr.write(
+        `# not named above — had activity in the window, did not make the summary: ${list}\n`
+      );
+    }
   });
 
 // ============================================================================
