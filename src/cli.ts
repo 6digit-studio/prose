@@ -79,7 +79,7 @@ import { grep, escapeRegex } from './grep.js';
 import { stats, renderCsv } from './stats.js';
 import { session, SessionAmbiguousError, SessionNotFoundError } from './session.js';
 import { tail, NoSessionForCwdError } from './tail.js';
-import { setBaton, listBatons, clearBatons, renderBatonLine } from './baton.js';
+import { setBaton, listBatons, clearBatons, renderBatonLine, batonOriginNote } from './baton.js';
 import type { SourceType } from './session-parser.js';
 import * as logger from './logger.js';
 import { createRequire } from 'module';
@@ -2303,7 +2303,9 @@ batonCmd
     const now = Date.now();
     for (const b of batons) {
       const age = formatBatonAge(now - new Date(b.timestamp).getTime());
-      process.stdout.write(`${renderBatonLine(b)}\n    ${b.project}  ·  ${age}\n`);
+      const origin = batonOriginNote(b);
+      const originLine = origin ? `  ·  ${origin}` : '';
+      process.stdout.write(`${renderBatonLine(b)}\n    ${b.project}  ·  ${age}${originLine}\n`);
     }
   });
 

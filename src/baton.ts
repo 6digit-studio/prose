@@ -292,6 +292,35 @@ export function renderBatonLine(b: Baton): string {
   return `↪ ${b.type.toUpperCase()}: ${b.content}`;
 }
 
+/**
+ * Whose handoff is the reader actually holding?
+ *
+ * The correlation keys above let a terminal recover *its own* baton when several
+ * work one project — but only when the environment offers an anchor. A Claude
+ * Code session has none of `CORRELATION_ENV_VARS` set, so every such session is
+ * anchorless, shares one slot, and is served whatever the last writer left.
+ * Rendered identically to its own handoff, that reads as "you are here" when it
+ * is in fact somebody else's position.
+ *
+ * Deliberately does NOT invent a new identity source: the keys are chosen to
+ * survive a `/clear`, and a per-conversation id would not. It only makes the
+ * ambiguity visible. Silent when the baton is demonstrably the reader's, and
+ * silent when there is nothing else it could be confused with.
+ *
+ * Returns a short note to show beside the baton, or null when the pick is
+ * unambiguous.
+ */
+export function batonOriginNote(b: Baton): string | null {
+  const current = captureCorrelationKeys();
+  if (correlationKeysMatch(b.keys, current)) return null;
+  const siblings = loadBatons().filter(
+    (x) => x.project === b.project && x.type === b.type && x.id !== b.id
+  );
+  if (siblings.length === 0) return null;
+  const anchor = Object.keys(current).length === 0 ? 'this session has no terminal anchor' : 'not this terminal';
+  return `${anchor} — ${siblings.length} other handoff(s) here; \`prose baton list --all\` for the rest`;
+}
+
 function formatAge(ms: number): string {
   if (ms < 60_000) return `${Math.round(ms / 1000)}s ago`;
   if (ms < 3_600_000) return `${Math.round(ms / 60_000)}m ago`;
