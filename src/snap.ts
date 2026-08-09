@@ -8,7 +8,7 @@
  */
 
 import { statSync } from 'fs';
-import { discoverSessionFiles, parseSessionFile, type Conversation, type Message } from './session-parser.js';
+import { discoverSessionFiles, isInvokingSession, parseSessionFile, type Conversation, type Message } from './session-parser.js';
 import {
   discoverCodexSessionFiles,
   parseCodexSessionFile,
@@ -208,7 +208,11 @@ export function snap(opts: SnapOptions = {}): SnapResult {
     // Code passed in (often a giant paste). Not orientation material.
     if (!includeSdkCli && conv.entrypoint === 'sdk-cli') continue;
 
-    // Live detection. Two complementary signals:
+    // Live detection. Three signals, exact first:
+    //   0. session id — the invoking session names itself in the environment,
+    //      so we never have to guess about our own file. The clock-based
+    //      signals below miss it whenever the last write is older than the
+    //      window, which is the common case on an agent's first tool call.
     //   1. mtime within liveWindowMs — catches the current Claude Code session
     //      even when it's between user-visible turns (tool_use/tool_result
     //      lines bump mtime continuously, even when no text was just written).
@@ -218,6 +222,7 @@ export function snap(opts: SnapOptions = {}): SnapResult {
     const lastMessageTime = conv.messages[conv.messages.length - 1].timestamp;
     const contentAgeMs = now - lastMessageTime.getTime();
     if (!includeCurrent && f.sourceType === 'claude-code') {
+      if (isInvokingSession(f.path)) continue;
       if (liveWindowMs > 0 && mtimeAgeMs < liveWindowMs) continue;
       if (fileGrewDuringParse(f.path, sizeBefore)) continue;
     }

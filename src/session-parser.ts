@@ -126,6 +126,26 @@ export function getClaudeProjectsDir(): string {
 }
 
 /**
+ * Is this session file the one that invoked us?
+ *
+ * Claude Code exports CLAUDE_CODE_SESSION_ID into every tool subprocess, and
+ * names the session JSONL `<id>.jsonl` — so "am I reading my own conversation"
+ * is an exact fact, not something to infer from a clock. The mtime window that
+ * callers apply alongside this stays useful as a fallback: it covers the other
+ * agents (Codex, opencode, Cursor, pi) and any launcher that exports no id.
+ *
+ * Without this, an agent whose last write was longer ago than the live window —
+ * which is the normal state on the FIRST tool call of a turn, after the model
+ * has spent time thinking — gets its own in-progress conversation handed back
+ * as "recent sessions", with nothing in the output marking it as such.
+ */
+export function isInvokingSession(filePath: string): boolean {
+  const id = process.env.CLAUDE_CODE_SESSION_ID;
+  if (!id) return false;
+  return basename(filePath, '.jsonl') === id;
+}
+
+/**
  * Discover all session files for a given project.
  * If currentCwd is provided, it will also scan for recent sessions in other project directories
  * where the internal CWD matches (to catch sessions misappropriated by Claude Code).

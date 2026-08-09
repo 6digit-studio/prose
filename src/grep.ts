@@ -11,6 +11,7 @@
  */
 import {
   discoverSessionFiles,
+  isInvokingSession,
   parseSessionFile,
   type Conversation,
   type SourceType,
@@ -337,6 +338,7 @@ export function grep(opts: GrepOptions): GrepResult {
     if (cutoff !== null && lastMessageTime.getTime() < cutoff) continue;
 
     if (!includeCurrent && f.sourceType === 'claude-code') {
+      if (isInvokingSession(f.path)) continue;
       const mtimeAgeMs = now - f.modifiedTime.getTime();
       if (liveWindowMs > 0 && mtimeAgeMs < liveWindowMs) continue;
     }
