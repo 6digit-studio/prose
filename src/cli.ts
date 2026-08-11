@@ -1675,8 +1675,27 @@ program
     }
 
     if (result.sessionsIncluded === 0) {
-      process.stderr.write(`No recent sessions found for cwd ${result.cwd}.\n`);
-      process.exit(1);
+      // Two ways to be empty, and they mean opposite things to an orienting
+      // agent. Saying "nothing found" for either is the failure prose exists to
+      // prevent: it sends the reader off to re-derive yesterday from `git log`.
+      //
+      //   1. A baton is present. That IS orientation — the previous session's
+      //      sign-off, often naming the next move — and it was already loaded
+      //      into `result.text`. Print it; never discard it just because no
+      //      *session* survived the filters.
+      //   2. The only sessions here were the reader's own live one. "Nothing
+      //      happened in this repo" is false; "the only recent session is the
+      //      conversation you're already in" is true and actionable.
+      const emitted = result.batons.length > 0;
+      if (emitted) process.stdout.write(result.text);
+
+      const own = result.skippedLiveSessions;
+      const why = own > 0
+        ? `No past sessions for cwd ${result.cwd} — the only recent session here is your own (${own} skipped). You already have that context.`
+        : `No recent sessions found for cwd ${result.cwd}.`;
+      process.stderr.write(`${why}\n`);
+      // Emitting a baton is a real answer; only a truly empty read is a failure.
+      process.exit(emitted ? 0 : 1);
     }
 
     process.stdout.write(result.text);

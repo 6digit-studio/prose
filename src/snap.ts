@@ -23,6 +23,7 @@ import {
 } from './cursor-session-parser.js';
 import {
   discoverPiSessionFiles,
+  discoverOmpSessionFiles,
   parsePiSessionFile,
 } from './pi-session-parser.js';
 import { listBatons, renderBatonHeader, type Baton } from './baton.js';
@@ -91,6 +92,14 @@ export interface SnapResult {
   sessions: SnapSessionMeta[];
   /** Latest batons for this cwd (latest per type), newest-first. */
   batons: Baton[];
+  /**
+   * How many sessions were dropped for being the reader's own live session
+   * (invoking-session id, live-mtime window, or file-growth). Load-bearing for
+   * the empty case: "nothing has happened in this repo" and "the only thing
+   * that happened here is the conversation you are already in" are different
+   * facts, and only one of them should send an agent digging.
+   */
+  skippedLiveSessions: number;
 }
 
 function formatAge(ms: number): string {
@@ -164,6 +173,7 @@ export function snap(opts: SnapOptions = {}): SnapResult {
   const opencodeFiles = discoverOpencodeSessionFiles(cwd);
   const cursorFiles = discoverCursorSessionFiles(cwd);
   const piFiles = discoverPiSessionFiles(cwd);
+  const ompFiles = discoverOmpSessionFiles(cwd);
   const now = Date.now();
 
   // Parse a wider set of candidates than maxSessions so we can re-sort by
@@ -178,6 +188,7 @@ export function snap(opts: SnapOptions = {}): SnapResult {
     ...opencodeFiles.slice(0, perSourceCap),
     ...cursorFiles.slice(0, perSourceCap),
     ...piFiles.slice(0, perSourceCap),
+    ...ompFiles.slice(0, perSourceCap),
   ].sort((a, b) => b.modifiedTime.getTime() - a.modifiedTime.getTime());
 
   type Parsed = {
@@ -188,6 +199,7 @@ export function snap(opts: SnapOptions = {}): SnapResult {
   };
 
   const parsed: Parsed[] = [];
+  let skippedLiveSessions = 0;
   for (const f of candidatePool) {
     const sizeBefore = f.fileSize;
     const conv =
@@ -197,8 +209,8 @@ export function snap(opts: SnapOptions = {}): SnapResult {
         ? parseOpencodeSessionFile(f.path)
         : f.sourceType === 'cursor'
         ? parseCursorSessionFile(f.path)
-        : f.sourceType === 'pi'
-        ? parsePiSessionFile(f.path)
+        : f.sourceType === 'pi' || f.sourceType === 'omp'
+        ? parsePiSessionFile(f.path, f.sourceType)
         : parseSessionFile(f.path);
     if (conv.messages.length === 0) continue;
 
@@ -222,9 +234,9 @@ export function snap(opts: SnapOptions = {}): SnapResult {
     const lastMessageTime = conv.messages[conv.messages.length - 1].timestamp;
     const contentAgeMs = now - lastMessageTime.getTime();
     if (!includeCurrent && f.sourceType === 'claude-code') {
-      if (isInvokingSession(f.path)) continue;
-      if (liveWindowMs > 0 && mtimeAgeMs < liveWindowMs) continue;
-      if (fileGrewDuringParse(f.path, sizeBefore)) continue;
+      if (isInvokingSession(f.path)) { skippedLiveSessions++; continue; }
+      if (liveWindowMs > 0 && mtimeAgeMs < liveWindowMs) { skippedLiveSessions++; continue; }
+      if (fileGrewDuringParse(f.path, sizeBefore)) { skippedLiveSessions++; continue; }
     }
 
     parsed.push({ file: f, conv, lastMessageTime, contentAgeMs });
@@ -253,6 +265,8 @@ export function snap(opts: SnapOptions = {}): SnapResult {
         ? 'Cursor'
         : p.file.sourceType === 'pi'
         ? 'pi'
+        : p.file.sourceType === 'omp'
+        ? 'OMP'
         : 'Claude Code';
 
     // Try the full tail first; if it overflows the remaining budget, shrink.
@@ -319,5 +333,6 @@ export function snap(opts: SnapOptions = {}): SnapResult {
     truncated,
     sessions: sessionsMeta,
     batons,
+    skippedLiveSessions,
   };
 }
