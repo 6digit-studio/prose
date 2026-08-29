@@ -1,20 +1,29 @@
 /**
- * Session Parser for pi coding-agent sessions (badlogic/pi-mono).
+ * Session Parser for pi coding-agent sessions (badlogic/pi-mono) and for omp,
+ * the pi descendant Lars runs as `omp`.
  *
- * pi writes one JSONL file per session under
+ * Both harnesses write one JSONL file per session, in the same `version: 3`
+ * format, under a per-harness root:
  *   ~/.pi/agent/sessions/<project-slug>/<timestamp>_<uuid>.jsonl
+ *   ~/.omp/agent/sessions/<project-slug>/<timestamp>_<uuid>.jsonl
+ * so one parser serves both; only the root dir and the stamped `sourceType`
+ * differ.
  *
  * The format is the cleanest of all the harnesses prose reads: a `session`
  * header line carries the cwd directly, and each `message` line carries a
  * stable id, an ISO timestamp, and a `message.content` block array. We extract
  * only `text` blocks — thinking, toolCall, and toolResult blocks are noise for
  * semantic memory, matching how the Codex/Claude Code parsers drop tool dumps.
+ *
+ * One delta between the two: pi always writes the `session` header on line 1,
+ * omp may emit a `{"type":"title",...}` line ahead of it. So we scan for the
+ * header rather than assuming it is the first line.
  */
 
 import { readFileSync, readdirSync, existsSync, statSync, openSync, readSync, closeSync, type Dirent } from 'fs';
 import { join, basename } from 'path';
 import { homedir } from 'os';
-import type { Message, SessionFile, Conversation } from './session-parser.js';
+import type { Message, SessionFile, Conversation, SourceType } from './session-parser.js';
 import { sanitizePath } from './memory.js';
 
 type PiRole = 'user' | 'assistant' | 'system';
@@ -50,45 +59,16 @@ function extractTextFromBlocks(content: unknown): string {
     .join('\n\n');
 }
 
-/** Read the first line of a pi session file to recover its id and cwd. */
-function readPiMeta(filePath: string): { sessionId: string; cwd?: string } | null {
+/** Parse one JSONL line, yielding session meta only if it is the header line. */
+function readSessionHeaderLine(
+  lineBuffer: Buffer,
+  filePath: string
+): { sessionId: string; cwd?: string } | null {
+  const line = lineBuffer.toString('utf-8').trim();
+  if (!line) return null;
   try {
-    const stats = statSync(filePath);
-    const fd = openSync(filePath, 'r');
-    const maxBytes = Math.min(stats.size, 512 * 1024);
-    const chunks: Buffer[] = [];
-    let offset = 0;
-
-    try {
-      while (offset < maxBytes) {
-        const toRead = Math.min(4096, maxBytes - offset);
-        const buffer = Buffer.alloc(toRead);
-        const bytesRead = readSync(fd, buffer, 0, toRead, offset);
-        if (bytesRead <= 0) break;
-
-        const slice = buffer.subarray(0, bytesRead);
-        const newlineIndex = slice.indexOf(10);
-        if (newlineIndex !== -1) {
-          chunks.push(slice.subarray(0, newlineIndex));
-          break;
-        }
-
-        chunks.push(slice);
-        offset += bytesRead;
-        if (bytesRead < toRead) break;
-      }
-    } finally {
-      closeSync(fd);
-    }
-
-    if (chunks.length === 0) return null;
-
-    const line = Buffer.concat(chunks).toString('utf-8').trim();
-    if (!line) return null;
-
     const parsed = JSON.parse(line) as { type?: string; id?: string; cwd?: string };
     if (parsed.type !== 'session') return null;
-
     return {
       sessionId: parsed.id || basename(filePath, '.jsonl'),
       cwd: parsed.cwd,
@@ -98,10 +78,56 @@ function readPiMeta(filePath: string): { sessionId: string; cwd?: string } | nul
   }
 }
 
+/**
+ * Scan the head of a session file for its `session` header to recover id and
+ * cwd. pi puts the header on line 1; omp may precede it with a `title` line,
+ * so we walk lines until we hit it, bounded by the same 512 KiB head window.
+ */
+function readPiMeta(filePath: string): { sessionId: string; cwd?: string } | null {
+  try {
+    const stats = statSync(filePath);
+    const fd = openSync(filePath, 'r');
+    const maxBytes = Math.min(stats.size, 512 * 1024);
+    let pending = Buffer.alloc(0);
+    let offset = 0;
+
+    try {
+      while (offset < maxBytes) {
+        const toRead = Math.min(4096, maxBytes - offset);
+        const buffer = Buffer.alloc(toRead);
+        const bytesRead = readSync(fd, buffer, 0, toRead, offset);
+        if (bytesRead <= 0) break;
+        offset += bytesRead;
+
+        const slice = buffer.subarray(0, bytesRead);
+        pending = pending.length === 0 ? slice : Buffer.concat([pending, slice]);
+
+        let newlineIndex = pending.indexOf(10);
+        while (newlineIndex !== -1) {
+          const meta = readSessionHeaderLine(pending.subarray(0, newlineIndex), filePath);
+          if (meta) return meta;
+          pending = pending.subarray(newlineIndex + 1);
+          newlineIndex = pending.indexOf(10);
+        }
+
+        if (bytesRead < toRead) break;
+      }
+
+      // Trailing line with no terminating newline (single-line file).
+      return readSessionHeaderLine(pending, filePath);
+    } finally {
+      closeSync(fd);
+    }
+  } catch {
+    return null;
+  }
+}
+
 function parsePiJsonlBuffer(
   buffer: Buffer,
   filePath: string,
   startOffset: number,
+  sourceType: SourceType,
   existingSessionId?: string,
   existingProject?: string
 ): { messages: Message[]; processedBytes: number; sessionId: string; project: string } {
@@ -177,7 +203,7 @@ function parsePiJsonlBuffer(
     messages,
     processedBytes: lastSuccessfulOffset,
     sessionId: sessionId || basename(filePath, '.jsonl'),
-    project: project || 'pi',
+    project: project || sourceType,
   };
 }
 
@@ -189,11 +215,20 @@ export function getPiSessionsDir(): string {
   return join(homedir(), '.pi', 'agent', 'sessions');
 }
 
+export function getOmpSessionsDir(): string {
+  return join(homedir(), '.omp', 'agent', 'sessions');
+}
+
 /**
- * Discover all pi session files, optionally filtered to a project.
+ * Walk one harness root for session files. pi and omp share this body; only
+ * the root and the stamped `sourceType` differ. A missing root is a silent
+ * no-op — not every machine runs both harnesses.
  */
-export function discoverPiSessionFiles(projectPath?: string): SessionFile[] {
-  const sessionsDir = getPiSessionsDir();
+function discoverSessionFilesUnder(
+  sessionsDir: string,
+  sourceType: SourceType,
+  projectPath?: string
+): SessionFile[] {
   if (!existsSync(sessionsDir)) return [];
 
   const sessionFiles: SessionFile[] = [];
@@ -230,10 +265,10 @@ export function discoverPiSessionFiles(projectPath?: string): SessionFile[] {
       sessionFiles.push({
         path: entryPath,
         sessionId: meta.sessionId,
-        project: projectName || 'pi',
+        project: projectName || sourceType,
         modifiedTime: stats.mtime,
         fileSize: stats.size,
-        sourceType: 'pi',
+        sourceType,
         cwd: meta.cwd,
       });
     }
@@ -242,14 +277,33 @@ export function discoverPiSessionFiles(projectPath?: string): SessionFile[] {
   return sessionFiles.sort((a, b) => b.modifiedTime.getTime() - a.modifiedTime.getTime());
 }
 
+/**
+ * Discover all pi session files, optionally filtered to a project.
+ */
+export function discoverPiSessionFiles(projectPath?: string): SessionFile[] {
+  return discoverSessionFilesUnder(getPiSessionsDir(), 'pi', projectPath);
+}
+
+/**
+ * Discover all omp session files, optionally filtered to a project.
+ */
+export function discoverOmpSessionFiles(projectPath?: string): SessionFile[] {
+  return discoverSessionFilesUnder(getOmpSessionsDir(), 'omp', projectPath);
+}
+
 // ============================================================================
 // Parsing
 // ============================================================================
 
-export function parsePiSessionFile(filePath: string): Conversation {
+/**
+ * Parse a pi-format session file. `sourceType` names which harness wrote it —
+ * the on-disk format is identical, so it only rides through to the returned
+ * Conversation and the project fallback.
+ */
+export function parsePiSessionFile(filePath: string, sourceType: SourceType = 'pi'): Conversation {
   const content = readFileSync(filePath, 'utf-8');
   const buffer = Buffer.from(content, 'utf-8');
-  const parsed = parsePiJsonlBuffer(buffer, filePath, 0);
+  const parsed = parsePiJsonlBuffer(buffer, filePath, 0, sourceType);
 
   return {
     sessionId: parsed.sessionId,
@@ -258,7 +312,7 @@ export function parsePiSessionFile(filePath: string): Conversation {
     startTime: parsed.messages[0]?.timestamp || new Date(),
     endTime: parsed.messages[parsed.messages.length - 1]?.timestamp || new Date(),
     processedBytes: parsed.processedBytes,
-    sourceType: 'pi',
+    sourceType,
   };
 }
 
@@ -266,7 +320,8 @@ export function parsePiSessionFileFromOffset(
   filePath: string,
   startOffset: number,
   existingSessionId?: string,
-  existingProject?: string
+  existingProject?: string,
+  sourceType: SourceType = 'pi'
 ): { messages: Message[]; processedBytes: number } {
   const stats = statSync(filePath);
   if (startOffset >= stats.size) {
@@ -278,6 +333,6 @@ export function parsePiSessionFileFromOffset(
   readSync(fd, buffer, 0, buffer.length, startOffset);
   closeSync(fd);
 
-  const parsed = parsePiJsonlBuffer(buffer, filePath, startOffset, existingSessionId, existingProject);
+  const parsed = parsePiJsonlBuffer(buffer, filePath, startOffset, sourceType, existingSessionId, existingProject);
   return { messages: parsed.messages, processedBytes: parsed.processedBytes };
 }

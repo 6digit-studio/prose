@@ -3,8 +3,8 @@
  *
  * Answers "how much am I actually doing this?": per-day active hours, message
  * volumes, session/project counts, and an hour-of-day histogram, across all
- * sources (Claude Code CLI, Codex, opencode, Cursor). Default scope is global
- * — all cwds — because the interesting number is the combined one.
+ * sources (Claude Code CLI, Codex, opencode, Cursor, pi, OMP). Default scope
+ * is global — all cwds — because the interesting number is the combined one.
  *
  * Active time is computed from message timestamps: consecutive messages less
  * than the idle gap apart (default 15m) merge into one interval; the per-day
@@ -37,6 +37,7 @@ import {
 } from './cursor-session-parser.js';
 import {
   discoverPiSessionFiles,
+  discoverOmpSessionFiles,
   parsePiSessionFile,
 } from './pi-session-parser.js';
 import { readSessionCwd } from './standup.js';
@@ -365,8 +366,10 @@ export function computeStats(
     };
   });
 
+  // Peak = busiest HUMAN day (your messages), not active. Active pins toward 24h
+  // for loop/background-driven days, which makes it a meaningless "busiest" pick.
   const peak = days.reduce(
-    (best: DayStats | null, d) => (best === null || d.activeMs > best.activeMs ? d : best),
+    (best: DayStats | null, d) => (best === null || d.humanMs > best.humanMs ? d : best),
     null
   );
 
@@ -459,7 +462,7 @@ function renderText(
       ? `avg/closed-day: ${hours(totals.averages.activeMsPerDay)}h active, ` +
         `${hours(totals.averages.humanMsPerDay)}h human (${totals.averages.closedActiveDays} closed day(s))`
       : 'avg/closed-day: n/a (no closed days in window)') +
-      (totals.peakDay ? ` — peak day ${totals.peakDay.day} (${hours(totals.peakDay.activeMs)}h)` : '') +
+      (totals.peakDay ? ` — peak human day ${totals.peakDay.day} (${hours(totals.peakDay.humanMs)}h)` : '') +
       ` — sources: ${sourceList}`
   );
 
@@ -522,7 +525,7 @@ export function stats(opts: StatsOptions = {}): StatsResult {
   const now = opts.now ?? Date.now();
   const cutoff = now - sinceMs;
   const sources: Set<SourceType> = new Set(
-    opts.sources ?? ['claude-code', 'codex', 'opencode', 'cursor', 'pi']
+    opts.sources ?? ['claude-code', 'codex', 'opencode', 'cursor', 'pi', 'omp']
   );
 
   // Discover globally; a cwd filter applies after parse, since the JSONL's cwd
@@ -535,6 +538,7 @@ export function stats(opts: StatsOptions = {}): StatsResult {
   if (sources.has('opencode')) candidates.push(...discoverOpencodeSessionFiles());
   if (sources.has('cursor')) candidates.push(...discoverCursorSessionFiles());
   if (sources.has('pi')) candidates.push(...discoverPiSessionFiles());
+  if (sources.has('omp')) candidates.push(...discoverOmpSessionFiles());
   candidates.sort((a, b) => b.modifiedTime.getTime() - a.modifiedTime.getTime());
 
   const stamps: MessageStamp[] = [];
@@ -561,8 +565,8 @@ export function stats(opts: StatsOptions = {}): StatsResult {
           ? parseOpencodeSessionFile(f.path)
           : f.sourceType === 'cursor'
           ? parseCursorSessionFile(f.path)
-          : f.sourceType === 'pi'
-          ? parsePiSessionFile(f.path)
+          : f.sourceType === 'pi' || f.sourceType === 'omp'
+          ? parsePiSessionFile(f.path, f.sourceType)
           : parseSessionFile(f.path);
       entry = {
         version: CACHE_VERSION,

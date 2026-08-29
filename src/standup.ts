@@ -27,9 +27,11 @@ import {
 } from './cursor-session-parser.js';
 import {
   discoverPiSessionFiles,
+  discoverOmpSessionFiles,
   parsePiSessionFile,
 } from './pi-session-parser.js';
 import { isGitRepo, getCommitsSince, type GitCommitSummary } from './source-parsers.js';
+import { type StatusLine } from './status-line.js';
 
 export interface StandupOptions {
   apiKey: string;
@@ -62,6 +64,12 @@ export interface StandupOptions {
   includeSdkCli?: boolean;
   /** Stream destination. Defaults to process.stdout. */
   out?: NodeJS.WritableStream;
+  /**
+   * Transient progress reporter. Standup is a ~15s wait with nothing on screen
+   * — the crawl, then the model — so it says what it is doing while it does it.
+   * Omit for silence.
+   */
+  status?: StatusLine;
 }
 
 export interface StandupProjectMeta {
@@ -212,24 +220,33 @@ export async function standup(opts: StandupOptions): Promise<StandupResult> {
   const includeCurrent = opts.includeCurrent ?? false;
   const includeSdkCli = opts.includeSdkCli ?? false;
 
+  const status = opts.status ?? { show() {}, clear() {} };
+
   const cutoff = Date.now() - windowMs;
+  status.show(`scanning agent journals from the last ${opts.since ?? '7d'}…`);
   const claudeFiles = discoverSessionFiles();
   const codexFiles = discoverCodexSessionFiles();
   const opencodeFiles = discoverOpencodeSessionFiles();
   const cursorFiles = discoverCursorSessionFiles();
   const piFiles = discoverPiSessionFiles();
+  const ompFiles = discoverOmpSessionFiles();
   // No per-source cap here: standup is already time-windowed by mtime, so
   // Claude Code can't structurally crowd the others out the way snap's
   // flat candidate slice did. Sort by mtime, drop everything below the cutoff
   // in the parse loop.
-  const allFiles = [...claudeFiles, ...codexFiles, ...opencodeFiles, ...cursorFiles, ...piFiles].sort(
-    (a, b) => b.modifiedTime.getTime() - a.modifiedTime.getTime()
-  );
+  const allFiles = [
+    ...claudeFiles,
+    ...codexFiles,
+    ...opencodeFiles,
+    ...cursorFiles,
+    ...piFiles,
+    ...ompFiles,
+  ].sort((a, b) => b.modifiedTime.getTime() - a.modifiedTime.getTime());
 
   type Kept = {
     cwd: string;
     sessionId: string;
-    sourceType: 'claude-code' | 'codex' | 'opencode' | 'cursor' | 'pi';
+    sourceType: 'claude-code' | 'codex' | 'opencode' | 'cursor' | 'pi' | 'omp';
     messages: Message[];
     lastMessageTime: Date;
   };
@@ -249,8 +266,8 @@ export async function standup(opts: StandupOptions): Promise<StandupResult> {
         ? parseOpencodeSessionFile(f.path)
         : f.sourceType === 'cursor'
         ? parseCursorSessionFile(f.path)
-        : f.sourceType === 'pi'
-        ? parsePiSessionFile(f.path)
+        : f.sourceType === 'pi' || f.sourceType === 'omp'
+        ? parsePiSessionFile(f.path, f.sourceType)
         : parseSessionFile(f.path);
     if (conv.messages.length === 0) continue;
     if (!includeSdkCli && conv.entrypoint === 'sdk-cli') continue;
@@ -281,6 +298,8 @@ export async function standup(opts: StandupOptions): Promise<StandupResult> {
           ? 'cursor'
           : f.sourceType === 'pi'
           ? 'pi'
+          : f.sourceType === 'omp'
+          ? 'omp'
           : 'claude-code',
       messages: tail,
       lastMessageTime: last.timestamp,
@@ -288,6 +307,7 @@ export async function standup(opts: StandupOptions): Promise<StandupResult> {
   }
 
   if (kept.length === 0) {
+    status.clear();
     return {
       windowMs,
       sessionsIncluded: 0,
@@ -322,8 +342,14 @@ export async function standup(opts: StandupOptions): Promise<StandupResult> {
   let promptBytes = 0;
   const projectsMeta: StandupProjectMeta[] = [];
 
-  for (const p of projectSections) {
+  for (const [idx, p] of projectSections.entries()) {
     const header = `## ${p.cwd}\n`;
+
+    // The git shell-outs below are the slow half of the crawl — one repo at a
+    // time is exactly the granularity a waiting reader can feel progress at.
+    status.show(
+      `reading ${basenameOf(p.cwd)} — project ${idx + 1} of ${projectSections.length}…`
+    );
 
     // Pull commits for this project, time-windowed. isGitRepo guards against
     // synthetic cwd fallbacks (e.g. derived dashy-name paths) and non-git dirs.
@@ -372,7 +398,13 @@ export async function standup(opts: StandupOptions): Promise<StandupResult> {
     baseURL: opts.baseUrl || 'https://openrouter.ai/api/v1',
     headers: { 'X-Title': 'prose' },
   });
-  const model = client(opts.model || 'google/gemini-3-flash-preview');
+  const modelId = opts.model || 'google/gemini-3-flash-preview';
+  const model = client(modelId);
+
+  status.show(
+    `${kept.length} session(s) across ${projectsMeta.length} project(s), ` +
+    `${Math.round(promptBytes / 1024)} KB — asking ${modelId}…`
+  );
 
   const result = await streamText({
     model,
@@ -385,6 +417,9 @@ export async function standup(opts: StandupOptions): Promise<StandupResult> {
 
   let text = '';
   for await (const chunk of result.textStream) {
+    // The first token is the moment the wait is over; drop the status before
+    // the answer starts landing on the same terminal.
+    status.clear();
     out.write(chunk);
     text += chunk;
   }

@@ -112,22 +112,27 @@ describe('computeStats', () => {
     expect(totals.activeDays).toBe(1);
   });
 
-  test('peak day is the busiest day by active time', () => {
+  test('peak day is the busiest HUMAN day, not the busiest active day', () => {
     const stamps = [
-      // 06-03: 30 minutes of activity
-      stamp(local(2026, 6, 3, 10, 0)),
-      stamp(local(2026, 6, 3, 10, 30)),
-      // 06-04: 70 minutes (two 35m bursts split by a 3h gap)
-      stamp(local(2026, 6, 4, 9, 0)),
-      stamp(local(2026, 6, 4, 9, 35)),
-      stamp(local(2026, 6, 4, 13, 0)),
-      stamp(local(2026, 6, 4, 13, 35)),
+      // 06-03: 60 minutes of YOUR time (three user messages, <gap apart).
+      stamp(local(2026, 6, 3, 10, 0), 'user'),
+      stamp(local(2026, 6, 3, 10, 30), 'user'),
+      stamp(local(2026, 6, 3, 11, 0), 'user'),
+      // 06-04: 150 minutes of ACTIVE time but only a single user message —
+      // a long agent/loop run with you barely at the keys. Active is higher
+      // here (150 > 60), human is lower (0 < 60); peak must follow human.
+      stamp(local(2026, 6, 4, 9, 0), 'user'),
+      stamp(local(2026, 6, 4, 9, 30), 'assistant'),
+      stamp(local(2026, 6, 4, 10, 0), 'assistant'),
+      stamp(local(2026, 6, 4, 10, 30), 'assistant'),
+      stamp(local(2026, 6, 4, 11, 0), 'assistant'),
+      stamp(local(2026, 6, 4, 11, 30), 'assistant'),
     ];
     const { totals } = computeStats(stamps, 60 * MIN);
     expect(totals.peakDay).toEqual({
-      day: '2026-06-04',
-      activeMs: 70 * MIN,
-      humanMs: 70 * MIN,
+      day: '2026-06-03',
+      activeMs: 60 * MIN,
+      humanMs: 60 * MIN,
     });
   });
 

@@ -29,6 +29,7 @@ import {
 } from './cursor-session-parser.js';
 import {
   discoverPiSessionFiles,
+  discoverOmpSessionFiles,
   parsePiSessionFile,
 } from './pi-session-parser.js';
 import {
@@ -126,6 +127,8 @@ function sourceLabel(t: NonNullable<SessionFile['sourceType']>): string {
       return 'Cursor';
     case 'pi':
       return 'pi';
+    case 'omp':
+      return 'OMP';
     default:
       return t;
   }
@@ -138,6 +141,7 @@ export function collectAllSessionFiles(): SessionFile[] {
   const opencode = discoverOpencodeSessionFiles();
   const cursor = discoverCursorSessionFiles();
   const pi = discoverPiSessionFiles();
+  const omp = discoverOmpSessionFiles();
 
   const antigravity: SessionFile[] = [];
   try {
@@ -152,14 +156,14 @@ export function collectAllSessionFiles(): SessionFile[] {
     // Ignore errors
   }
 
-  return [...claude, ...codex, ...opencode, ...cursor, ...pi, ...antigravity];
+  return [...claude, ...codex, ...opencode, ...cursor, ...pi, ...omp, ...antigravity];
 }
 
 export function parseByType(f: SessionFile): Conversation {
   if (f.sourceType === 'codex') return parseCodexSessionFile(f.path);
   if (f.sourceType === 'opencode') return parseOpencodeSessionFile(f.path);
   if (f.sourceType === 'cursor') return parseCursorSessionFile(f.path);
-  if (f.sourceType === 'pi') return parsePiSessionFile(f.path);
+  if (f.sourceType === 'pi' || f.sourceType === 'omp') return parsePiSessionFile(f.path, f.sourceType);
   if (f.sourceType === 'antigravity') {
     const messages = parseAntigravityArtifact(f.path, f.sessionId, f.project);
     const startTime = messages.length ? messages[0].timestamp : f.modifiedTime;

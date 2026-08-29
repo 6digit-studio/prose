@@ -35,12 +35,14 @@ export {
   decodeCursorCwd,
 } from './cursor-session-parser.js';
 
-// pi (pi-mono) session parsing
+// pi (pi-mono) and omp session parsing — one format, two harness roots
 export {
   discoverPiSessionFiles,
+  discoverOmpSessionFiles,
   parsePiSessionFile,
   parsePiSessionFileFromOffset,
   getPiSessionsDir,
+  getOmpSessionsDir,
 } from './pi-session-parser.js';
 
 // Baton service — prose-native "you are here" markers
