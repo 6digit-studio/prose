@@ -1650,7 +1650,7 @@ program
   .description('Verbatim readout of recent agent sessions in the current cwd (Claude Code CLI, ACP, Codex, opencode, Cursor, pi, and OMP). Orient without retracing.')
   .option('--bytes <n>', 'Byte budget for assembled text (default 4000)', (v) => parseInt(v, 10))
   .option('--turns <n>', 'Last N messages per session (default 4)', (v) => parseInt(v, 10))
-  .option('--sessions <n>', 'Max sessions to include (default 5)', (v) => parseInt(v, 10))
+  .option('--sessions <n>', 'Max sessions to include (default 10)', (v) => parseInt(v, 10))
   .option('--max-message-bytes <n>', 'Per-message byte cap; long messages get truncated with [N bytes elided] (default 1500, 0 disables)', (v) => parseInt(v, 10))
   .option('--include-current', 'Include the actively-written session (default skipped)')
   .option('--include-sdk-cli', 'Include sdk-cli sessions (Claude Code automation: commit-message generators, etc. — noise by default)')

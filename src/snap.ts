@@ -34,7 +34,7 @@ export interface SnapOptions {
   bytes?: number;
   /** Last N messages per session (default 4 → ~2 turn-pairs). */
   turnsPerSession?: number;
-  /** Cap on how many sessions to include (default 5). */
+  /** Cap on how many sessions to include (default 10). */
   maxSessions?: number;
   /**
    * Per-message byte cap. Long messages (e.g. a 7500-line diff pasted into a
@@ -120,7 +120,7 @@ function clipMessageContent(content: string, maxBytes: number): string {
   return `${head}\n... [${elided} bytes elided]`;
 }
 
-function renderSessionBlock(
+export function renderSessionBlock(
   sessionId: string,
   sourceLabel: string,
   lastMessageTime: Date,
@@ -138,6 +138,37 @@ function renderSessionBlock(
     lines.push('');
   }
   return lines.join('\n') + '\n';
+}
+
+export function renderSessionWithinBudget(
+  sessionId: string,
+  sourceLabel: string,
+  lastMessageTime: Date,
+  ageLabel: string,
+  messages: Message[],
+  turnsPerSession: number,
+  maxMessageBytes: number,
+  blockBudget: number
+): { block: string; tail: Message[] } | null {
+  for (let n = turnsPerSession; n >= 1; n--) {
+    const tail = messages.slice(-n);
+    const headerBytes = Buffer.byteLength(
+      renderSessionBlock(sessionId, sourceLabel, lastMessageTime, ageLabel, [], maxMessageBytes),
+      'utf-8'
+    );
+    const contentBudget = Math.max(1, blockBudget - headerBytes - tail.length * 100);
+    const fairMessageBytes = Math.max(1, Math.floor(contentBudget / tail.length));
+    const block = renderSessionBlock(
+      sessionId,
+      sourceLabel,
+      lastMessageTime,
+      ageLabel,
+      tail,
+      Math.min(maxMessageBytes, fairMessageBytes)
+    );
+    if (Buffer.byteLength(block, 'utf-8') <= blockBudget) return { block, tail };
+  }
+  return null;
 }
 
 /**
@@ -159,7 +190,7 @@ export function snap(opts: SnapOptions = {}): SnapResult {
   const cwd = opts.cwd ?? process.cwd();
   const bytesBudget = opts.bytes ?? 4000;
   const turnsPerSession = opts.turnsPerSession ?? 4;
-  const maxSessions = opts.maxSessions ?? 5;
+  const maxSessions = opts.maxSessions ?? 10;
   const maxMessageBytes = opts.maxMessageBytes ?? 1500;
   const liveWindowMs = opts.liveSessionWindowMs ?? 10_000;
   const includeCurrent = opts.includeCurrent ?? false;
@@ -269,48 +300,38 @@ export function snap(opts: SnapOptions = {}): SnapResult {
         ? 'OMP'
         : 'Claude Code';
 
-    // Try the full tail first; if it overflows the remaining budget, shrink.
-    // This lets a small later session squeeze in even after a chunky one
-    // landed earlier — much better than `break` on first overflow.
+    // Try the full tail first; if it overflows its fair share, shrink.
+    // Reserving space for later sessions prevents a few verbose recent tails
+    // from hiding every older session behind them.
     const remaining = bytesBudget - bytes;
-    let block: string | null = null;
-    let tail: Message[] = [];
-    for (let n = turnsPerSession; n >= 1; n--) {
-      const candidateTail = p.conv.messages.slice(-n);
-      const candidate = renderSessionBlock(
-        p.conv.sessionId,
-        sourceLabel,
-        p.lastMessageTime,
-        formatAge(p.contentAgeMs),
-        candidateTail,
-        maxMessageBytes
-      );
-      const candidateBytes = Buffer.byteLength(candidate, 'utf-8');
-      // Always include at least one session (even if it overflows alone), so
-      // the user gets *something*; otherwise honor the remaining budget.
-      if (sections.length === 0 || candidateBytes <= remaining) {
-        block = candidate;
-        tail = candidateTail;
-        break;
-      }
-    }
+    const sessionsRemaining = Math.min(maxSessions - sessionsMeta.length, parsed.length - sessionsMeta.length);
+    const blockBudget = Math.floor(remaining / sessionsRemaining);
+    const rendered = renderSessionWithinBudget(
+      p.conv.sessionId,
+      sourceLabel,
+      p.lastMessageTime,
+      formatAge(p.contentAgeMs),
+      p.conv.messages,
+      turnsPerSession,
+      maxMessageBytes,
+      blockBudget
+    );
 
-    if (!block) {
-      // Even one message wouldn't fit — stop trying further sessions.
+    if (!rendered) {
       truncated = true;
-      break;
+      continue;
     }
 
-    const blockBytes = Buffer.byteLength(block, 'utf-8');
-    sections.push(block);
+    const blockBytes = Buffer.byteLength(rendered.block, 'utf-8');
+    sections.push(rendered.block);
     bytes += blockBytes;
-    turnsIncluded += tail.length;
+    turnsIncluded += rendered.tail.length;
     sessionsMeta.push({
       sessionId: p.conv.sessionId,
       lastMessageTime: p.lastMessageTime.toISOString(),
       modifiedTime: p.file.modifiedTime.toISOString(),
       ageMs: p.contentAgeMs,
-      messageCount: tail.length,
+      messageCount: rendered.tail.length,
     });
 
     if (bytes >= bytesBudget) {

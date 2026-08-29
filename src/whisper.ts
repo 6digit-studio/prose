@@ -76,7 +76,7 @@ export function whisper(opts: WhisperOptions = {}): WhisperResult {
       cwd: member.path,
       bytes: memberBytes,
       turnsPerSession: opts.turnsPerSession,
-      maxSessions: opts.maxSessions ?? (isSelf ? 5 : 2),
+      maxSessions: opts.maxSessions ?? (isSelf ? 10 : 2),
       maxMessageBytes: opts.maxMessageBytes,
       liveSessionWindowMs: opts.liveSessionWindowMs,
       includeCurrent: opts.includeCurrent,
